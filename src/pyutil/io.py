@@ -5,6 +5,7 @@ import tifffile as tiff
 import SimpleITK as sitk
 import numpy as np
 
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -80,32 +81,34 @@ class DataManager:
     
     @staticmethod
     def save_data(fp, data, verboseQ=False):
-        return save_data(fp, data, verboseQ)
+        return write_data(fp, data, verboseQ)
     
     @staticmethod
     def load_data(fp):
         return load_data(fp)
         
 
-def save_data(fp, data, verboseQ=False):
+def write_data(fp, data, verboseQ=False):
     folder, fn = os.path.split(fp)
     fn, ext = os.path.splitext(fn)
     os.makedirs(folder, exist_ok=True)
     if ext == '.mat':
         if isinstance(data, dict):
-            save_dict_as_mat_file(fp, data)
+            write_dict_as_mat_file(fp, data)
     elif ext == '.h5':
-        save_h5(fp, data)
+        write_h5(fp, data)
     elif ext == '.json':
         write_json(fp, data)
     elif ext == '.pickle':
-        save_pkl(fp, data)
-    elif ext == '.txt':
+        write_pkl(fp, data)
+    elif ext in ('.txt', '.csv'):
         write_text(fp, data)
     elif ext == '.tif':
         tiff.imwrite(fp, data)
     elif ext == '.nii':
         write_nii(fp, data)
+    elif ext == '.npz':
+        write_npz(fp, data)
     else:
         raise "Unrecognized file type"
     if verboseQ:
@@ -130,6 +133,8 @@ def load_data(fp, arg=None):
             return load_nii(fp)
         else:
             raise "Unrecognized file type"
+    elif ext == '.npz':
+        return load_npz(fp)
     else: 
         raise "Unrecognized file type"
     
@@ -153,17 +158,23 @@ def load_data(fp, arg=None):
 #         # Save the dictionary
 #         save_dict_to_h5(h5file, data)
 
-def save_dict_as_mat_file(fp, data):
+def write_dict_as_mat_file(fp, data):
     savemat(fp, data, appendmat=True, format='5',
             long_field_names=True, do_compression=False, oned_as='column')
     
-def save_pkl(fp, data):
+def write_pkl(fp, data):
     parent_dir, tmp  = os.path.split(fp)
     os.makedirs(parent_dir, exist_ok=True)
     with open(fp, 'wb') as file:
         pickle.dump(data, file)
 
-def save_h5(fp: str, data):
+def write_npz(fp, data):
+    if isinstance(data, dict):
+        np.savez(fp, **data)
+    else:
+        raise TypeError(f"Unsupported data type: {type(data)}")
+
+def write_h5(fp: str, data):
     if isinstance(data, dict):
         save_dict_as_h5(fp, data)
     else:
@@ -231,9 +242,8 @@ def dict_to_sparse_mat(d):
     return mat
 
 def write_text(fp, txt):
-    f = open(fp, "w")
-    f.write(txt)
-    f.close()
+    with open(fp, "w", encoding='utf-8') as f: 
+        f.write(txt)
 
 def write_json(fp, data):
     assert isinstance(data, dict), 'Only support writing diction into a json file'
@@ -245,11 +255,20 @@ def write_nii(fp, data):
     sitk_data.SetOrigin((0.0, 0.0, 0.0))
     sitk_data.SetSpacing((1.0, 1.0, 1.0))
     sitk.WriteImage(sitk_data, fp)
+
+def write_csv(fp, data):
+    # if isinstance(data, pd.
+    pass
+
 #endregion 
 
 ####################
 #region Loading data 
 ####################
+def load_npz(fp):
+    with np.load(fp, allow_pickle=True) as data:
+        return dict(data)
+
 def load_pickle(fp):
     with open(fp, 'rb') as file:
         return pickle.load(file)
@@ -464,7 +483,7 @@ def _read_h5_cell(group, reorder_dimensions):
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
 
-def print_image(fig_hdl, fig_fp):
+def print_image(fig_hdl, fig_fp, verbose_Q=True):
     folder_path = os.path.dirname(fig_fp)
     if folder_path and (not os.path.isdir(folder_path)): 
         os.makedirs(folder_path)
@@ -481,15 +500,16 @@ def print_image(fig_hdl, fig_fp):
         fig_hdl.savefig(fig_fp, dpi=300, bbox_inches='tight')
     else:
         fig_hdl.savefig(fig_fp)
+    if verbose_Q:
+        print('Finish saving figure as {:s}'.format(fig_fp))
 
-def print_image_in_several_formats(fig_hdl, fig_fp, format_list=['.pdf', '.pickle', '.png']):
+def print_image_in_several_formats(fig_hdl, fig_fp, format_list=['.pdf', '.pickle', '.png'], verbose_Q=True):
     fn, ext = os.path.splitext(fig_fp)
     if ext not in format_list:
         format_list.append(ext)
     for ie in format_list:
         ifn = fn + ie
-        print_image(fig_hdl, ifn)
-        print('Finish saving figure as {:s}'.format(ifn))
+        print_image(fig_hdl, ifn, verbose_Q=verbose_Q)
 
 def load_matplotlib_pickle_file(fp):
     with open(fp, 'rb') as f:

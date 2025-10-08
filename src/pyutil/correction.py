@@ -1,7 +1,7 @@
 import numpy as np
 from scipy import ndimage
 
-import utils.stat as stat
+from . import stat
 
 
 def correct_global_lineshift(im, shift):

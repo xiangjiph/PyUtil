@@ -179,3 +179,64 @@ def dict_of_dict_to_dict_of_array(dod, to_numpy_Q=True):
         for k, v in result.items():
             result[k] = np.asarray(v)
     return result
+
+def select_val_by_num_repeat(id_list, min_syn_per_rid=1):
+    """Select root ids by the number of repeats.
+    Input:
+        rid_list: list or array of root ids
+        min_syn_per_rid: int, minimum number of synapses per root id
+    Output:
+        selected_Q: logical array, 1 for selected
+    """
+    if min_syn_per_rid <= 1: 
+        return np.ones_like(id_list, dtype=bool)
+    else: 
+        id2idx = bin_data_to_idx_list(id_list, return_type='dict')
+        selected_Q = np.zeros_like(id_list, dtype=bool)
+        for k, v in id2idx.items():
+            if v.size >= min_syn_per_rid:
+                selected_Q[v] = True
+        return selected_Q
+
+def rows_in(A, B):
+    """Check if each rows in A is in B
+    Input: 
+        A: (N, d) numpy array
+        B: (M, d) numpy array
+    Output: 
+        mask: (N,) boolean array, 1 if row in A is in B, 0 otherwise
+    """
+    A = np.ascontiguousarray(A)
+    B = np.ascontiguousarray(B)
+    dt = np.dtype([('', A.dtype)] * A.shape[1])   # 1 field per column
+    Av = A.view(dt).ravel()
+    Bv = B.view(dt).ravel()
+    return np.isin(Av, Bv)   # boolean mask of length N
+
+
+class ScalarDict: 
+    def __init__(self, key, value=None): 
+        idx = np.argsort(key, kind='stable')
+        self.key = key[idx]
+        if value is None: 
+            self.value = np.arange(key.size)
+        else: 
+            assert key.shape == value.shape, "ind and label should have the same shape"
+            self.value = value[idx]
+        
+    def get_value(self, keys, not_found_val=-1):
+        keys = np.asarray(keys)
+        idx = np.searchsorted(self.key, keys, side='left')
+        found_Q = (idx < self.key.size) & (self.key[idx] == keys)
+        result = np.full(keys.shape, not_found_val, dtype=self.value.dtype)
+        result[found_Q] = self.value[idx[found_Q]]
+        return result
+
+    def get_label(self, query_idx):
+        query_idx = np.asarray(query_idx)
+        assert np.all((query_idx >= 0) & (query_idx < self.value.size)), "query_idx out of range"
+        return self.key[query_idx]
+
+        
+
+        

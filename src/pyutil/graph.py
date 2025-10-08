@@ -10,9 +10,9 @@ from scipy.sparse.csgraph import dijkstra, shortest_path
 from numba import njit
 import networkx as nx
 
-import utils.neighbors as nb
-import utils.image as im
-import utils.util as util
+from . import neighbors as nb
+from . import image as im
+from . import util as util
 
 class GraphCC: 
     # A collection of connected components

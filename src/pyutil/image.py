@@ -1,6 +1,6 @@
 import numpy as np
 import scipy as sp
-import cv2
+# import cv2
 from scipy.io import savemat
 from scipy import ndimage as ndi
 # import pandas as pd
@@ -14,6 +14,16 @@ def normalized_integer_data(data):
         type_info = np.iinfo(data_type)
         data = data.astype(np.float32) / type_info.max
     return data
+
+def rescale(im):
+    im = im.astype(np.float32)
+    im_min = np.min(im)
+    im_max = np.max(im)
+    if im_max > im_min:
+        im = (im - im_min) / (im_max - im_min)
+    else:
+        im = im - im_min
+    return im
 
 def im_int16_to_uint16(data, method='truncate'):
     # Set all negative values to 0
@@ -32,28 +42,28 @@ def downsampling_by_stepping(im, step):
     elif im.ndim == 3:
         return im[::step[0], ::step[1], ::step[2]]
 
-def remove_shot_noise_2d_in_plane(data, wd_sz): # can be replaced by the dask version
-    data_dim = data.ndim
-    if data_dim == 2:
-        data = data[None, :, :]
-    for i in range(data.shape[0]):
-        data[i, :, :] = cv2.medianBlur(data[i, :, :], wd_sz)
-        # data[i, :, :] = ndimage.median_filter(data[i, :, :], size=wd_sz)
+# def remove_shot_noise_2d_in_plane(data, wd_sz): # can be replaced by the dask version
+#     data_dim = data.ndim
+#     if data_dim == 2:
+#         data = data[None, :, :]
+#     for i in range(data.shape[0]):
+#         data[i, :, :] = cv2.medianBlur(data[i, :, :], wd_sz)
+#         # data[i, :, :] = ndimage.median_filter(data[i, :, :], size=wd_sz)
 
-    if data_dim == 2:
-        data = np.squeeze(data)
-    return data
+#     if data_dim == 2:
+#         data = np.squeeze(data)
+#     return data
 
-def resize_image_stack_2d(im, target_size_2d):
-    if im.ndim == 2:
-        im = im[None, :, :]
-    target_stack_size = (im.shape[0], target_size_2d[0], target_size_2d[1])
-    im_rz = np.zeros(target_stack_size, dtype=im.dtype)
-    for i in range(im.shape[0]):
-        # The size in opencv is (width, height)
-        im_rz[i, :, :] = cv2.resize(
-            im[i, :, :], (target_size_2d[1], target_size_2d[0]), interpolation=cv2.INTER_AREA)
-    return np.squeeze(im_rz)
+# def resize_image_stack_2d(im, target_size_2d):
+#     if im.ndim == 2:
+#         im = im[None, :, :]
+#     target_stack_size = (im.shape[0], target_size_2d[0], target_size_2d[1])
+#     im_rz = np.zeros(target_stack_size, dtype=im.dtype)
+#     for i in range(im.shape[0]):
+#         # The size in opencv is (width, height)
+#         im_rz[i, :, :] = cv2.resize(
+#             im[i, :, :], (target_size_2d[1], target_size_2d[0]), interpolation=cv2.INTER_AREA)
+#     return np.squeeze(im_rz)
 
 def find_cc_1d(mask_1d):
     # Find connected component in 1D logical array 

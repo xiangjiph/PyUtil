@@ -7,7 +7,8 @@ import scipy.interpolate as spi
 import sklearn.mixture as sklm
 import matplotlib.pyplot as plt
 
-def compute_basic_statistics(data, bins=None):
+def compute_basic_statistics(data, bins=None, opt_stat=['pdf', 'percentile'], \
+                             reject_outlier_ipr=None):
     # bins:
     #   If scalar, should be an integer that specifies the number of bins used for the histogram calculation.
     #   If a list or numpy array, the PDF, CDF calculation will be based on the bin edge. Data outside the edge will be ignored.
@@ -20,48 +21,85 @@ def compute_basic_statistics(data, bins=None):
         print(data)
         raise
     data = data.flatten()
-    stat = {'num_data': data.size, 'mean': np.nan, 'std': np.nan, 'cv': np.nan, 'max': np.nan, 'min': np.nan, 'median': np.nan, 
-            'num_bins': np.array([]), 'hist_count': np.array([]), 'bin_val': np.array([]), 
-            'bin_width': np.array([]), 'probability': np.array([]), 'pdf': np.array([]),
-             'cdf': np.array([]),'prctile_th': np.array([]), 'prctile_th': np.array([]), 
-             'eff_ptrl_std': np.nan, 'eff_ptrl_cv': np.nan}
+    if reject_outlier_ipr is not None and data.size > 0: 
+        outlier_th = compute_percentile_outlier_threshold(data, ipr=reject_outlier_ipr)
+        in_lier_Q = (data >= outlier_th[0]) & (data <= outlier_th[1])
+        data = data[in_lier_Q]
 
+    result = {'num_data': data.size, 'mean': np.nan, 'std': np.nan, 'cv': np.nan, 'max': np.nan, 'min': np.nan, 'median': np.nan, 
+        'num_bins': np.array([]), 'hist_count': np.array([]), 'bin_val': np.array([]), 
+        'bin_edge': np.array([]), 'bin_width': np.array([]), 'probability': np.array([]), 'pdf': np.array([]),
+        'cdf': np.array([]),'prctile_th': np.array([]), 'prctile_th': np.array([]), 
+        'eff_ptrl_std': np.nan, 'eff_ptrl_cv': np.nan}
     if bins is None:
-        stat['num_bins'] = 10
+        result['num_bins'] = 10
     elif np.isscalar(bins):
-        stat['num_bins'] = bins
+        result['num_bins'] = bins
     else:
+        # input is bin edge
         if not isinstance(bins, np.ndarray):
             bins = np.array(bins)
-    if data.size > 0: 
-        stat['mean'] = np.mean(data)
-        mean_x2 = np.mean(data ** 2)
-        stat['std'] = np.sqrt(mean_x2 - stat['mean'] ** 2)
-        stat['cv'] = stat['std'] / np.abs(stat['mean'])
-
-        if isinstance(bins, np.ndarray):
-            stat['num_bins'] = bins.size - 1
-            stat['hist_count'], stat['bin_edge'] = np.histogram(data, bins=bins)
-        else:
-            stat['hist_count'], stat['bin_edge'] = np.histogram(
-                data, bins=stat['num_bins'])
-
-        stat['bin_val'] = (stat['bin_edge'][:-1] + stat['bin_edge'][1:]) / 2
-        stat['bin_width'] = stat['bin_edge'][1:] - stat['bin_edge'][:-1]
-        stat['probability'] = stat['hist_count'] / np.sum(stat['hist_count'])
-        stat['pdf'] = stat['probability'] / stat['bin_width']
-        stat['cdf'] = np.cumsum(stat['probability'])
-
-        stat['prctile_th'] = np.array(
-            [0, 0.1, 1, 5, 10, 25, 50, 75, 90, 95, 99, 99.9, 100])
-        stat['prctile_val'] = np.percentile(data, q=stat['prctile_th'])
-        stat['median'] = stat['prctile_val'][6]
-        stat['max'] = stat['prctile_val'][-1]
-        stat['min'] = stat['prctile_val'][0]
-        stat['eff_ptrl_std'] = (stat['prctile_val'][7] - stat['prctile_val'][5]) / 1.349
-        stat['eff_ptrl_cv'] = np.abs(stat['eff_ptrl_std'] / stat['median'])
         
-    return stat
+    if data.size > 0: 
+        result['mean'] = np.mean(data)
+        mean_x2 = np.mean(data ** 2)
+        result['std'] = np.sqrt(mean_x2 - result['mean'] ** 2)
+        result['cv'] = result['std'] / np.abs(result['mean']) if result['mean'] != 0 else np.nan
+        if 'pdf' in opt_stat: 
+            if isinstance(bins, np.ndarray):
+                result['num_bins'] = bins.size - 1 # bin edge
+                result['hist_count'], result['bin_edge'] = np.histogram(data, bins=bins)
+            else:
+                result['hist_count'], result['bin_edge'] = np.histogram(
+                    data, bins=result['num_bins'])
+
+            result['bin_val'] = (result['bin_edge'][:-1] + result['bin_edge'][1:]) / 2
+            result['bin_width'] = result['bin_edge'][1:] - result['bin_edge'][:-1]
+            result['probability'] = result['hist_count'] / np.sum(result['hist_count'])
+            result['pdf'] = result['probability'] / result['bin_width']
+            result['cdf'] = np.cumsum(result['probability'])
+
+        if 'percentile' in opt_stat: 
+            result['prctile_th'] = np.array(
+                [0, 0.1, 1, 5, 10, 25, 50, 75, 90, 95, 99, 99.9, 100])
+            result['prctile_val'] = np.percentile(data, q=result['prctile_th'])
+            result['median'] = result['prctile_val'][6]
+            result['max'] = result['prctile_val'][-1]
+            result['min'] = result['prctile_val'][0]
+            result['eff_ptrl_std'] = (result['prctile_val'][7] - result['prctile_val'][5]) / 1.349
+            result['eff_ptrl_cv'] = np.abs(result['eff_ptrl_std'] / result['median'])
+        
+    return result
+
+def compute_stat_by_idx_bin(data_1d, bin_idx:list, stat_list=['mean', 'std'], 
+                                    feature_name=None):
+    if isinstance(data_1d, pd.Series):
+        data_1d = data_1d.values
+    else: 
+        data_1d = np.asarray(data_1d)
+    # assert isinstance(data_1d, np.ndarray) and data_1d.ndim == 1
+
+    num_bins = len(bin_idx)
+    feature_stat_list = [f"{feature_name}_{stat_name}" if feature_name is not None else f"{stat_name}"\
+                            for stat_name in stat_list]
+    bin_stat = {}
+    for s_k in feature_stat_list: 
+        bin_stat[s_k] = np.full(num_bins, np.nan, dtype=np.float32)
+
+    for i, tmp_idx in enumerate(bin_idx):                
+        tmp_gd = data_1d[tmp_idx]
+        if tmp_gd.size: 
+            for s_k in feature_stat_list: 
+                if s_k.endswith('mean'): 
+                    tmp_stat = np.mean(tmp_gd)
+                elif s_k.endswith('std'): 
+                    tmp_stat = np.std(tmp_gd)
+                else: 
+                    print(f"Unknown statistical value {s_k}. Skip")
+                    continue
+                bin_stat[s_k][i] = tmp_stat
+    
+    return bin_stat
 
 def compute_percentile_outlier_threshold(x, ipr = 1.5):
     # ipr = 1.5 -> 2 sigma
@@ -69,6 +107,15 @@ def compute_percentile_outlier_threshold(x, ipr = 1.5):
     p25, p75 = np.nanpercentile(x, [25, 75])
     width = ipr * (p75 - p25)
     return [p25 - width, p75 + width]
+
+def is_outerlier_by_percentile(x, ipr = 1.5):
+    th = compute_percentile_outlier_threshold(x, ipr=ipr)
+    return (x < th[0]) | (x > th[1])
+
+def remove_outlier_by_percentile(x, ipr = 1.5):
+    th = compute_percentile_outlier_threshold(x, ipr=ipr)
+    in_lier_Q = (x >= th[0]) & (x <= th[1])
+    return x[in_lier_Q]
 
 def fill_internal_nan(data, method='linear'):
     mask = np.isnan(data)
@@ -189,7 +236,6 @@ def analyze_1d_data_with_gaussian_mixture(data, num_comp_list, vis_Q=False):
 
     return result
 
-
 def relative_difference(x, y):
     x = np.asarray(x).astype(np.float32)
     y = np.asarray(y).astype(np.float32)
@@ -269,7 +315,9 @@ def compute_rolling_inliner_range(data, wd_sz, k=3):
     return lower_bound.values, upper_bound.values
 
 def analyze_matrix_diagonals(mat):
-
+    """
+    
+    """
     assert mat.shape[0] == mat.shape[1], 'mat is not a square matrix'
     l = mat.shape[0]
     diag_offset = np.arange(-l + 1, l)
@@ -344,3 +392,258 @@ def compute_ratio_uncertainty(x, y, x_std, y_std):
     f_y = y / s
     f_x_sigma = np.sqrt( (y * x_std/ s ** 2) ** 2 + (x * y_std / s ** 2) ** 2 )
     return f_x, f_y, f_x_sigma, f_x_sigma
+
+def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_Q=True, 
+                                         compute_eig_Q=True):
+    """
+    Compute basic statistics for a d-dimensional point cloud.
+
+    Args:
+        point_cloud (np.ndarray): A (N, d) array of points.
+        weights (np.ndarray, optional): A (N,) array of weights for each point.
+
+    Returns:
+        dict: A dictionary containing the mean and covariance of the point cloud.
+            - mean: The mean of the point cloud (d-dimensional).
+            - cov: The covariance matrix of the point cloud (d x d).
+            - eig_s: The square root of eigenvalues of the covariance matrix (d-dimensional), sorted in descending order.
+            - eig_v: The eigenvectors of the covariance matrix (d x d). Each column is the right eigenvector
+    """
+    compute_cov_Q = compute_cov_Q or compute_eig_Q
+
+    point_cloud = np.atleast_2d(np.asarray(point_cloud))
+    is_valid_Q = np.isfinite(point_cloud).all(axis=1)
+    point_cloud = point_cloud[is_valid_Q]
+    if weights is not None:
+        weights = np.atleast_1d(np.asarray(weights))
+        weights = weights[is_valid_Q]
+
+    num_pts, num_d = point_cloud.shape
+    stats = {'n': num_pts,
+             'mean': np.full((num_d,), np.nan),
+             'cov': np.full((num_d, num_d), np.nan), 
+             'eig_s': np.full((num_d,), np.nan), 
+             'eig_v': np.full((num_d, num_d), np.nan)}
+    stats['mean'] = np.average(point_cloud, axis=0, weights=weights)
+    if compute_cov_Q and num_pts > 1:
+        stats['cov'] = np.cov(point_cloud - stats['mean'], rowvar=False, fweights=weights, ddof=0)
+        if compute_eig_Q: 
+            eig_val, eig_vec = np.linalg.eig(stats['cov'])
+            # sort eigenvalue in descending order
+            sorted_indices = np.argsort(eig_val)[::-1]
+            stats['eig_s'] = np.sqrt(eig_val[sorted_indices])
+            stats['eig_v'] = eig_vec[:, sorted_indices]
+        else: 
+            stats.pop('eig_s', None)
+            stats.pop('eig_v', None)
+    else: 
+        stats.pop('cov', None)
+
+    return stats
+
+def point_cloud_linear_outlier_rejection(point_pos, ipr=1.5): 
+    """
+    Reject outliers in a point cloud based on the inter-percentile range (IPR) method.
+
+    Args:
+        point_pos (np.ndarray): A (N, d) array of points.
+        ipr (float): The multiplier for the inter-percentile range to define outliers.
+
+    Returns:
+        np.ndarray: A boolean array indicating which points are inliers (True) and which are outliers (False).
+    """
+    if point_pos.shape[0] < 3: 
+        return point_pos
+    pt_stat = compute_point_cloud_basic_statistics(point_pos, compute_cov_Q=True, compute_eig_Q=True)
+
+    pt_mean = np.mean(point_pos, axis=0)
+    pt_xyz_dm = point_pos - pt_mean
+    pt_vec = pt_stat['eig_v']
+    pt_std = pt_stat['eig_s']
+    pt_std_ratio = pt_std[1] / pt_std[0]
+    if pt_std_ratio > 0.5: 
+        print(f"Warning: the second PC explains {pt_std_ratio:.3f} of the first PC, indicating a planar distribution of synapses.")
+    # compute the residual 
+    pt_res_dist = np.sqrt(np.sum((pt_xyz_dm @ pt_vec[:, 1:]) ** 2, axis=1))
+    pt_res_lim = compute_percentile_outlier_threshold(pt_res_dist, ipr=ipr)
+    pt_is_inlier_Q = (pt_res_dist <= pt_res_lim[1])
+    point_pos = point_pos[pt_is_inlier_Q, :]
+    
+    return point_pos
+
+
+def eigs_to_cov(eig_sigma, eig_v): 
+    cov = eig_v @ np.diag(eig_sigma ** 2) @ eig_v.T
+    return cov
+
+def compute_point_cloud_dist_from_stat(stat1, stat2, project_to_eig1=True):
+    """
+    Compute the distance between two point cloud statistics from compute_point_cloud_basic_statistics
+    Inputs: 
+        - stat1: The first point cloud statistics
+        - stat2: The second point cloud statistics.
+    """
+    dist_info = {}
+    # Chi-squared test for 3D points
+    dist_info['d_mu'] = stat2['mean'] - stat1['mean']
+    dist_info['l_mu'] = np.linalg.norm(dist_info['d_mu'])
+    dist_info['n_1'] = stat1['n']
+    dist_info['n_2'] = stat2['n']
+    if stat1['n'] < 2 and stat2['n'] < 2:
+        dist_info['V'] = np.full((3, 3), np.nan)
+    elif stat1['n'] < 2:
+        sig = stat2['cov']
+    elif stat2['n'] < 2: 
+        sig = stat1['cov']
+    else:
+        sig = stat1['cov'] / stat1['n'] + stat2['cov'] / stat2['n']
+    dist_info['T2'] = dist_info['d_mu'] @ np.linalg.pinv(sig) @ dist_info['d_mu']
+    dist_info['D2'] = dist_info['d_mu'] @ np.linalg.pinv(stat1['cov']) @ dist_info['d_mu']
+    # Project the mean from the second point cloud into the eigenvector 
+    # of the first point cloud
+    if project_to_eig1: 
+        if 'eig_v' in stat1: 
+            eig_v = stat1['eig_v']
+            eig_s = stat1['eig_s']
+        else: 
+            eig_val, eig_v = np.linalg.eig(stat1['cov'])
+            sorted_indices = np.argsort(eig_val)[::-1]
+            eig_s = np.sqrt(eig_val[sorted_indices])
+            eig_v = eig_v[:, sorted_indices]
+        # Unify eigenvetor direction
+        eig_v_d = eig_v.copy()
+        for i in range(eig_v.shape[1]):
+            tmp_idx = np.argmax(np.abs(eig_v_d[:, i]))
+            if eig_v_d[tmp_idx, i] < 0:
+                eig_v_d[:, i] *= -1
+        dist_info['eig_v_1'] = eig_v_d
+        dist_info['eig_s_1'] = eig_s
+        dist_info['d_mu2eig_v1'] = eig_v_d.T @ dist_info['d_mu']
+
+    return dist_info
+
+def rebin_histogram(
+    bin_val: np.ndarray,
+    count: np.ndarray,
+    new_bin_val: np.ndarray,
+    *,
+    input_is_pdf: bool = False,
+    output_pdf: bool = False,
+    even_tol: float = 1e-5
+) -> np.ndarray:
+    """
+    Re-bin a 1D histogram from original bin centers to new bin centers via
+    linear interpolation of the cumulative distribution (CDF). This preserves
+    area/total count.
+
+    Parameters
+    ----------
+    bin_val : (N,) np.ndarray
+        Original bin centers (assumed evenly spaced and strictly increasing).
+    count : (N,) np.ndarray
+        Values at the original bins. If `input_is_pdf=False` these are counts
+        (mass per bin). If `input_is_pdf=True` these are PDF values
+        (mass per unit x) sampled at bin centers and assumed constant within
+        each bin.
+    new_bin_val : (M,) np.ndarray
+        Target bin centers (assumed evenly spaced and strictly increasing).
+    input_is_pdf : bool, default False
+        When True, `count` is treated as PDF values; otherwise as bin counts.
+    output_pdf : bool, default False
+        When True, returns a PDF at `new_bin_val`; otherwise returns counts
+        per new bin.
+    even_tol : float, default 1e-9
+        Tolerance for checking even spacing.
+
+    Returns
+    -------
+    np.ndarray
+        Re-binned values aligned with `new_bin_val`. Type matches `output_pdf`.
+
+    Notes
+    -----
+    * Original and new bin spacings are inferred from the centers.
+    * Outside the support of the original histogram, mass is taken as 0.
+    * Complexity is O(N + M), using vectorized NumPy operations.
+    """
+
+    bin_val = np.asarray(bin_val, dtype=float)
+    count   = np.asarray(count,   dtype=float)
+    new_bin_val = np.asarray(new_bin_val, dtype=float)
+
+    if bin_val.ndim != 1 or count.ndim != 1 or new_bin_val.ndim != 1:
+        raise ValueError("All inputs must be 1D arrays.")
+    if len(bin_val) != len(count):
+        raise ValueError("bin_val and count must have the same length.")
+    if len(bin_val) < 2 or len(new_bin_val) < 1:
+        raise ValueError("Need at least 2 original bins and 1 target bin.")
+
+    # Ensure strictly increasing
+    if not (np.all(np.diff(bin_val) > 0) and np.all(np.diff(new_bin_val) > 0)):
+        raise ValueError("bin_val and new_bin_val must be strictly increasing.")
+
+    # Original spacing (must be even)
+    dxs = np.diff(bin_val)
+    dx  = float(np.mean(dxs))
+    if np.max(np.abs(dxs - dx)) > even_tol * max(1.0, abs(dx)):
+        raise ValueError("bin_val must be evenly spaced within tolerance.")
+
+    # New spacing (must be even)
+    if len(new_bin_val) > 1:
+        ndxs = np.diff(new_bin_val)
+        ndx  = float(np.mean(ndxs))
+        if np.max(np.abs(ndxs - ndx)) > even_tol * max(1.0, abs(ndx)):
+            raise ValueError("new_bin_val must be evenly spaced within tolerance.")
+    else:
+        # If only one new bin, choose the same width as original for PDF conversion
+        ndx = dx
+
+    # Build original edges from centers
+    edges = np.concatenate(([bin_val[0] - 0.5 * dx],
+                            0.5 * (bin_val[1:] + bin_val[:-1]),
+                            [bin_val[-1] + 0.5 * dx]))
+
+    # Convert inputs to per-bin mass and per-bin density
+    if input_is_pdf:
+        # mass in each original bin = pdf * dx (assume piecewise-constant within bin)
+        bin_mass = count * dx
+        density  = count                  # mass per unit x within each bin
+    else:
+        bin_mass = count
+        density  = bin_mass / dx          # mass per unit x within each bin
+
+    # CDF at left edges: cdf_edges[i] = mass up to edges[i]
+    cdf_edges = np.concatenate(([0.0], np.cumsum(bin_mass)))
+    total_mass = cdf_edges[-1]
+
+    # Helper: evaluate CDF at arbitrary x via linear-in-bin interpolation.
+    # Vectorized with searchsorted; outside support is clamped to [0, total_mass].
+    def cdf_at(x: np.ndarray) -> np.ndarray:
+        x = np.asarray(x, dtype=float)
+        # Clip to support to keep indices valid; below becomes edges[0], above edges[-1]
+        x_clipped = np.clip(x, edges[0], edges[-1])
+        # Find bin index j such that edges[j] <= x < edges[j+1]; j in [0, N-1]
+        j = np.searchsorted(edges, x_clipped, side="right") - 1
+        j = np.clip(j, 0, len(density) - 1)
+        dx_in = x_clipped - edges[j]
+        # CDF is linear within bin with slope = density[j]
+        return cdf_edges[j] + density[j] * dx_in
+
+    # New bin edges from new centers
+    new_edges = np.concatenate(([new_bin_val[0] - 0.5 * ndx],
+                                0.5 * (new_bin_val[1:] + new_bin_val[:-1]),
+                                [new_bin_val[-1] + 0.5 * ndx]))
+
+    # Re-binned mass per new bin via CDF difference
+    cdf_right = cdf_at(new_edges[1:])
+    cdf_left  = cdf_at(new_edges[:-1])
+    new_mass  = cdf_right - cdf_left
+
+    if output_pdf:
+        # Convert mass back to density (PDF) on the new uniform grid
+        new_pdf = new_mass / ndx
+        return new_pdf
+    else:
+        return new_mass
+    
+
