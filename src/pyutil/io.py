@@ -4,6 +4,7 @@ import h5py, json, pickle
 import tifffile as tiff
 import SimpleITK as sitk
 import numpy as np
+import pandas as pd
 
 
 import matplotlib as mpl
@@ -109,6 +110,8 @@ def write_data(fp, data, verboseQ=False):
         write_nii(fp, data)
     elif ext == '.npz':
         write_npz(fp, data)
+    elif ext == '.parquet':
+        write_parquet(fp, data)       
     else:
         raise "Unrecognized file type"
     if verboseQ:
@@ -135,6 +138,8 @@ def load_data(fp, arg=None):
             raise "Unrecognized file type"
     elif ext == '.npz':
         return load_npz(fp)
+    elif ext == '.parquet':
+        return pd.read_parquet(fp)
     else: 
         raise "Unrecognized file type"
     
@@ -259,6 +264,16 @@ def write_nii(fp, data):
 def write_csv(fp, data):
     # if isinstance(data, pd.
     pass
+
+def write_parquet(fp, data):
+    import pandas as pd
+    if isinstance(data, dict):
+        df = pd.DataFrame.from_dict(data)
+        df.to_parquet(fp, index=False)
+    elif isinstance(data, pd.DataFrame):
+        data.to_parquet(fp, index=False)
+    else:
+        raise TypeError(f"Unsupported data type: {type(data)}")
 
 #endregion 
 

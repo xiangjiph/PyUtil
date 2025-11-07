@@ -154,26 +154,28 @@ def ind_coordinate_transform_euclidean(c1_ind, c1_shape, vec_c1_to_c2, c2_shape)
     c2_ind = np.ravel_multi_index(c1_sub, c2_shape)
     return c2_ind
 
-def list_of_dict_to_dict_of_array(lod, to_numpy_Q=True): 
+def list_of_dict_to_dict_of_array(lod, to_numpy_Q=True, exclude_keys=[]): 
     result = {}
-
     for tmp_d in lod: 
         for k, v in tmp_d.items():
-            if k not in result: 
-                result[k] = []
-            result[k].append(v)
-    
+            if k not in exclude_keys:
+                if k not in result: 
+                    result[k] = []
+                result[k].append(v)
+        
     if to_numpy_Q: 
         for k, v in result.items():
             result[k] = np.asarray(v)
     
     return result
 
-def dict_of_dict_to_dict_of_array(dod, to_numpy_Q=True):
+def dict_of_dict_to_dict_of_array(dod, to_numpy_Q=True, key_name='key', 
+                                  exclude_keys=[]):
     result = {}
-    result['key'] = list(dod.keys())
-    lod = [dod[k] for k in result['key']]
-    result |= list_of_dict_to_dict_of_array(lod, to_numpy_Q=False)
+    result[key_name] = list(dod.keys())
+    lod = [dod[k] for k in result[key_name]]
+    result |= list_of_dict_to_dict_of_array(lod, to_numpy_Q=False, 
+                                            exclude_keys=exclude_keys)
 
     if to_numpy_Q: 
         for k, v in result.items():
@@ -213,6 +215,96 @@ def rows_in(A, B):
     Bv = B.view(dt).ravel()
     return np.isin(Av, Bv)   # boolean mask of length N
 
+def minimize_int_dtype(arr: np.ndarray, *, allow_bool: bool = True, 
+                       copy: bool = False) -> np.ndarray:
+    """
+    Return `arr` cast to the smallest exact NumPy integer dtype that can
+    represent all its values. If no smaller exact dtype exists, return `arr`
+    (or a no-copy cast).
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array. Must be an integer dtype (including bool) or empty.
+    allow_bool : bool, default True
+        If True and the array values are only {0,1}, use dtype=bool.
+    copy : bool, default False
+        Passed to `astype`. If False and dtype is unchanged, returns
+        the original array; if True, forces a copy on cast.
+
+    Notes
+    -----
+    * Works for signed/unsigned ints.
+    * Empty arrays are returned unchanged (no range to infer).
+    * If values exceed np.uint64 / np.int64 bounds (e.g., object dtype with
+      huge Python ints), this function leaves the array unchanged.
+
+    Examples
+    --------
+    >>> a = np.array([0, 1, 255], dtype=np.int64)
+    >>> minimize_int_dtype(a).dtype
+    dtype('uint8')
+
+    >>> b = np.array([-5, 0, 120], dtype=np.int64)
+    >>> minimize_int_dtype(b).dtype
+    dtype('int8')
+
+    >>> c = np.array([0, 1, 0, 1], dtype=np.int32)
+    >>> minimize_int_dtype(c, allow_bool=True).dtype
+    dtype('bool')
+
+    >>> d = np.array([], dtype=np.int64)
+    >>> minimize_int_dtype(d).dtype
+    dtype('int64')
+    """
+    
+    if not isinstance(arr, np.ndarray):
+        raise TypeError("arr must be a NumPy ndarray")
+
+    if arr.size == 0:
+        # No values -> keep dtype (and avoid needless copies)
+        return arr
+
+    if not (np.issubdtype(arr.dtype, np.integer) or arr.dtype == np.bool_):
+        raise TypeError(f"arr must have an integer dtype, got {arr.dtype!r}")
+
+    # If already bool or can be bool safely
+    if allow_bool:
+        # Using unique is fine; for huge arrays you could early-exit by checking min/max ⊆ {0,1}
+        # without materializing uniques, but this is typically fast enough.
+        # Use min/max to avoid scanning entire array twice.
+        mn = int(arr.min())
+        mx = int(arr.max())
+        if mn >= 0 and mx <= 1:
+            # Casting to bool is exact
+            return arr.astype(np.bool_, copy=copy)
+
+    # Compute range
+    mn = int(arr.min())
+    mx = int(arr.max())
+
+    # If negative values exist, we must use signed types.
+    signed_chain = [np.int8, np.int16, np.int32, np.int64]
+    unsigned_chain = [np.uint8, np.uint16, np.uint32, np.uint64]
+
+    def fits(dtype):
+        info = np.iinfo(dtype)
+        return info.min <= mn and mx <= info.max
+
+    # Try unsigned if nonnegative, else signed
+    if mn >= 0:
+        for dt in unsigned_chain:
+            if fits(dt):
+                # If already this dtype, return original (unless copy=True and cast changes)
+                return arr.astype(dt, copy=copy)
+        # Could be a Python-int (object) array exceeding uint64. Leave unchanged.
+        return arr
+    else:
+        for dt in signed_chain:
+            if fits(dt):
+                return arr.astype(dt, copy=copy)
+        # Exceeds int64; leave unchanged.
+        return arr
 
 class ScalarDict: 
     def __init__(self, key, value=None): 
@@ -225,7 +317,7 @@ class ScalarDict:
             self.value = value[idx]
         
     def get_value(self, keys, not_found_val=-1):
-        keys = np.asarray(keys)
+        keys = np.asarray(keys).astype(dtype=self.key.dtype, copy=False)
         idx = np.searchsorted(self.key, keys, side='left')
         found_Q = (idx < self.key.size) & (self.key[idx] == keys)
         result = np.full(keys.shape, not_found_val, dtype=self.value.dtype)
@@ -237,6 +329,8 @@ class ScalarDict:
         assert np.all((query_idx >= 0) & (query_idx < self.value.size)), "query_idx out of range"
         return self.key[query_idx]
 
+    def __call__(self, rid):
+        return self.get_value(rid)
         
 
         

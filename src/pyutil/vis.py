@@ -17,6 +17,8 @@ import pickle
 import plotly.graph_objects as go
 import plotly.express as px
 
+from . import stat as pyutil_stat
+
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
 
@@ -29,6 +31,13 @@ def get_cmap_with_black_for_0(cmap='jet', reversed_Q=False):
     cmap_val[0] = [0, 0, 0, 1]  # RGBA (Black with full opacity)
     new_cmap = mcolors.ListedColormap(cmap_val)
     return new_cmap
+
+def get_matplotlib_cmap_as_hex(cmap_name: str, n_colors: int) -> List[str]:
+    """Get n distinct colors from a matplotlib colormap as hex strings."""
+    cmap = plt.get_cmap(cmap_name, n_colors)
+    num_col = cmap.N
+    hex_colors = [mcolors.to_hex(cmap(i / num_col)) for i in range(n_colors)]
+    return hex_colors
 
 def get_random_bright_color_in_hex(seed=None, s_range=(0.70, 0.95), v_range=(0.90, 1.00)):
     rng = random.Random(seed) if seed is not None else random
@@ -702,7 +711,7 @@ def point_2d_cloud_stat_to_ellipse(mu, eig_vec, eig_s, n_std=1):
 
 def vis_2d_ellipse(mu, eig_vec, eig_s, n_std=1, f=None, ax=None, 
                    label=None, color=None, alpha=1, s=None, 
-                   xlabel=None, ylabel=None):
+                   xlabel=None, ylabel=None, label_ctr_Q=True):
     """
     Visualize a 2D ellipse based on point cloud statistics.
     Parameters:
@@ -717,7 +726,63 @@ def vis_2d_ellipse(mu, eig_vec, eig_s, n_std=1, f=None, ax=None,
         f, ax = plt.subplots(figsize=(5, 5))
 
     ax.scatter(mu[0], mu[1], s=s, label=label, color=color, alpha=alpha)
-    ax.plot(ellip_xy[0], ellip_xy[1], alpha=alpha, color=color)
+    if label_ctr_Q: 
+        ctr_label = f"({mu[0]:.1f}, {mu[1]:.1f}) ± {n_std} σ"
+    else: 
+        ctr_label = None
+    ax.plot(ellip_xy[0], ellip_xy[1], alpha=alpha, color=color, label=ctr_label)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
+    if label_ctr_Q:
+        ax.legend()
     return f, ax
+
+def vis_2d_pt_hist2(pts, bins=None, f=None, a=None, vis_ellipse_Q=False, 
+                    ellipse_n_std=1, ellipse_color='r', ellipse_alpha=1,
+                    hist_cmap='jet', hist_colorbar_Q=True, hist_vmin=None, hist_vmax=None,
+                    xlabel=None, ylabel=None, title=None):
+    """
+    Visualize a 2D point cloud and its histogram.
+    Parameters:
+        pts: 2D points (2xN)
+        bins: Number of bins for the histogram (default is 30)
+        f: Matplotlib figure (if None, a new figure is created)
+        a: Matplotlib axis (if None, a new axis is created)
+        vis_ellipse_Q: Whether to visualize the ellipse (default is False)
+        ellipse_n_std: Number of standard deviations for the ellipse (default is 1)
+        ellipse_color: Color of the ellipse (default is 'r')
+        ellipse_alpha: Alpha value for the ellipse (default is 1)
+        hist_cmap: Colormap for the histogram (default is 'Blues')
+        hist_colorbar_Q: Whether to show colorbar for the histogram (default is True)
+        hist_vmin: Minimum value for histogram color scaling
+        hist_vmax: Maximum value for histogram color scaling
+        xlabel: Label for x-axis
+        ylabel: Label for y-axis
+        title: Title of the plot
+    """
+    if f is None or a is None:
+        f, a = plt.subplots(figsize=(5, 4))
+    
+    if bins is None:
+        bins = 20
+    
+    assert pts.shape[0] == 2, ValueError("pts must be a (2, N) np.array")
+
+    h = a.hist2d(pts[0], pts[1], bins=bins, cmap=hist_cmap, vmin=hist_vmin, vmax=hist_vmax)
+    
+    if hist_colorbar_Q:
+        cb = f.colorbar(h[3], ax=a)
+        cb.set_label('Counts')
+
+    if vis_ellipse_Q:
+        pt_stat = pyutil_stat.compute_point_cloud_basic_statistics(pts.T)
+        f, a = vis_2d_ellipse(pt_stat['mean'], pt_stat['eig_v'], pt_stat['eig_s'],
+                              n_std=ellipse_n_std, f=f, ax=a, color=ellipse_color, 
+                              alpha=ellipse_alpha)
+    if xlabel is not None:
+        a.set_xlabel(xlabel)
+    if ylabel is not None:
+        a.set_ylabel(ylabel)
+    if title is not None:
+        a.set_title(title)
+    return f, a

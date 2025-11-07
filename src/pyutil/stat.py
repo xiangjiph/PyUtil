@@ -112,10 +112,12 @@ def is_outerlier_by_percentile(x, ipr = 1.5):
     th = compute_percentile_outlier_threshold(x, ipr=ipr)
     return (x < th[0]) | (x > th[1])
 
-def remove_outlier_by_percentile(x, ipr = 1.5):
+def is_inlier_by_percentile(x, ipr = 1.5):
     th = compute_percentile_outlier_threshold(x, ipr=ipr)
-    in_lier_Q = (x >= th[0]) & (x <= th[1])
-    return x[in_lier_Q]
+    return (x >= th[0]) & (x <= th[1])
+
+def remove_outlier_by_percentile(x, ipr = 1.5):
+    return x[is_inlier_by_percentile(x, ipr=ipr)]
 
 def fill_internal_nan(data, method='linear'):
     mask = np.isnan(data)
@@ -423,21 +425,30 @@ def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_
              'mean': np.full((num_d,), np.nan),
              'cov': np.full((num_d, num_d), np.nan), 
              'eig_s': np.full((num_d,), np.nan), 
-             'eig_v': np.full((num_d, num_d), np.nan)}
-    stats['mean'] = np.average(point_cloud, axis=0, weights=weights)
-    if compute_cov_Q and num_pts > 1:
-        stats['cov'] = np.cov(point_cloud - stats['mean'], rowvar=False, fweights=weights, ddof=0)
-        if compute_eig_Q: 
-            eig_val, eig_vec = np.linalg.eig(stats['cov'])
-            # sort eigenvalue in descending order
-            sorted_indices = np.argsort(eig_val)[::-1]
-            stats['eig_s'] = np.sqrt(eig_val[sorted_indices])
-            stats['eig_v'] = eig_vec[:, sorted_indices]
+             'eig_v': np.full((num_d, num_d), np.nan), 
+             'tot_weight': np.nansum(weights) if weights is not None else num_pts}
+    if num_pts > 0: 
+        stats['mean'] = np.average(point_cloud, axis=0, weights=weights)
+        if compute_cov_Q: 
+            if num_pts > 1:
+                stats['cov'] = np.cov(point_cloud - stats['mean'], rowvar=False, fweights=weights, ddof=0)
+            else: 
+                stats['cov'] = np.zeros((num_d, num_d))
+            if compute_eig_Q: 
+                if num_pts > 1: 
+                    eig_val, eig_vec = np.linalg.eig(stats['cov'])
+                    # sort eigenvalue in descending order
+                    sorted_indices = np.argsort(eig_val)[::-1]
+                    stats['eig_s'] = np.sqrt(eig_val[sorted_indices])
+                    stats['eig_v'] = eig_vec[:, sorted_indices]
+                else: 
+                    stats['eig_s'] = np.zeros((num_d,))
+                    stats['eig_v'] = np.eye(num_d)
+            else: 
+                stats.pop('eig_s', None)
+                stats.pop('eig_v', None)
         else: 
-            stats.pop('eig_s', None)
-            stats.pop('eig_v', None)
-    else: 
-        stats.pop('cov', None)
+            stats.pop('cov', None)
 
     return stats
 
