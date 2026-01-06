@@ -88,10 +88,14 @@ class DataManager:
     def load_data(fp):
         return load_data(fp)
         
+def _splitext(fp):
+    if fp.lower().endswith('.nii.gz'):
+        return fp[:-7], '.nii.gz'
+    return os.path.splitext(fp)
 
 def write_data(fp, data, verboseQ=False):
     folder, fn = os.path.split(fp)
-    fn, ext = os.path.splitext(fn)
+    fn, ext = _splitext(fn)
     os.makedirs(folder, exist_ok=True)
     if ext == '.mat':
         if isinstance(data, dict):
@@ -106,7 +110,7 @@ def write_data(fp, data, verboseQ=False):
         write_text(fp, data)
     elif ext == '.tif':
         tiff.imwrite(fp, data)
-    elif ext == '.nii':
+    elif ext in ['.nii', '.nii.gz']:
         write_nii(fp, data)
     elif ext == '.npz':
         write_npz(fp, data)
@@ -175,7 +179,8 @@ def write_pkl(fp, data):
 
 def write_npz(fp, data):
     if isinstance(data, dict):
-        np.savez(fp, **data)
+        # np.savez(fp, **data)
+        np.savez_compressed(fp, **data)
     else:
         raise TypeError(f"Unsupported data type: {type(data)}")
 

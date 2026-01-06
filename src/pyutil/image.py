@@ -143,8 +143,3 @@ def stretch_contrast(input_image, saturate_ptl_low=0.5, saturate_ptl_high=99.95,
 
 
 #endregion
-
-#region Morphological operations
-
-
-#endregion Morphological operations

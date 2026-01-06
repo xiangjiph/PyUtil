@@ -209,9 +209,9 @@ def rows_in(A, B):
         mask: (N,) boolean array, 1 if row in A is in B, 0 otherwise
     """
     A = np.ascontiguousarray(A)
-    B = np.ascontiguousarray(B)
+    B = np.ascontiguousarray(B.astype(A.dtype, copy=True))
     dt = np.dtype([('', A.dtype)] * A.shape[1])   # 1 field per column
-    Av = A.view(dt).ravel()
+    Av = A.view(dt).ravel() # effectively flatten the now 1d structured array without copy
     Bv = B.view(dt).ravel()
     return np.isin(Av, Bv)   # boolean mask of length N
 
@@ -305,6 +305,26 @@ def minimize_int_dtype(arr: np.ndarray, *, allow_bool: bool = True,
                 return arr.astype(dt, copy=copy)
         # Exceeds int64; leave unchanged.
         return arr
+
+def swap_two_layer_nested_dict_order(dod):
+    """Swap the order of keys in a two-layer nested dictionary.
+    Input:
+        dod: dict of dict
+    Output:
+        swapped_dod: dict of dict
+    Example:
+        dod = {'a': {'x': 1, 'y': 2},
+               'b': {'x': 3, 'y': 4}}
+        swapped_dod = {'x': {'a': 1, 'b': 3},
+                       'y': {'a': 2, 'b': 4}}
+    """
+    swapped_dod = {}
+    for k1, sub_d in dod.items():
+        for k2, v in sub_d.items():
+            if k2 not in swapped_dod:
+                swapped_dod[k2] = {}
+            swapped_dod[k2][k1] = v
+    return swapped_dod
 
 class ScalarDict: 
     def __init__(self, key, value=None): 

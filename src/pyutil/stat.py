@@ -395,144 +395,6 @@ def compute_ratio_uncertainty(x, y, x_std, y_std):
     f_x_sigma = np.sqrt( (y * x_std/ s ** 2) ** 2 + (x * y_std / s ** 2) ** 2 )
     return f_x, f_y, f_x_sigma, f_x_sigma
 
-def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_Q=True, 
-                                         compute_eig_Q=True):
-    """
-    Compute basic statistics for a d-dimensional point cloud.
-
-    Args:
-        point_cloud (np.ndarray): A (N, d) array of points.
-        weights (np.ndarray, optional): A (N,) array of weights for each point.
-
-    Returns:
-        dict: A dictionary containing the mean and covariance of the point cloud.
-            - mean: The mean of the point cloud (d-dimensional).
-            - cov: The covariance matrix of the point cloud (d x d).
-            - eig_s: The square root of eigenvalues of the covariance matrix (d-dimensional), sorted in descending order.
-            - eig_v: The eigenvectors of the covariance matrix (d x d). Each column is the right eigenvector
-    """
-    compute_cov_Q = compute_cov_Q or compute_eig_Q
-
-    point_cloud = np.atleast_2d(np.asarray(point_cloud))
-    is_valid_Q = np.isfinite(point_cloud).all(axis=1)
-    point_cloud = point_cloud[is_valid_Q]
-    if weights is not None:
-        weights = np.atleast_1d(np.asarray(weights))
-        weights = weights[is_valid_Q]
-
-    num_pts, num_d = point_cloud.shape
-    stats = {'n': num_pts,
-             'mean': np.full((num_d,), np.nan),
-             'cov': np.full((num_d, num_d), np.nan), 
-             'eig_s': np.full((num_d,), np.nan), 
-             'eig_v': np.full((num_d, num_d), np.nan), 
-             'tot_weight': np.nansum(weights) if weights is not None else num_pts}
-    if num_pts > 0: 
-        stats['mean'] = np.average(point_cloud, axis=0, weights=weights)
-        if compute_cov_Q: 
-            if num_pts > 1:
-                stats['cov'] = np.cov(point_cloud - stats['mean'], rowvar=False, fweights=weights, ddof=0)
-            else: 
-                stats['cov'] = np.zeros((num_d, num_d))
-            if compute_eig_Q: 
-                if num_pts > 1: 
-                    eig_val, eig_vec = np.linalg.eig(stats['cov'])
-                    # sort eigenvalue in descending order
-                    sorted_indices = np.argsort(eig_val)[::-1]
-                    stats['eig_s'] = np.sqrt(eig_val[sorted_indices])
-                    stats['eig_v'] = eig_vec[:, sorted_indices]
-                else: 
-                    stats['eig_s'] = np.zeros((num_d,))
-                    stats['eig_v'] = np.eye(num_d)
-            else: 
-                stats.pop('eig_s', None)
-                stats.pop('eig_v', None)
-        else: 
-            stats.pop('cov', None)
-
-    return stats
-
-def point_cloud_linear_outlier_rejection(point_pos, ipr=1.5): 
-    """
-    Reject outliers in a point cloud based on the inter-percentile range (IPR) method.
-
-    Args:
-        point_pos (np.ndarray): A (N, d) array of points.
-        ipr (float): The multiplier for the inter-percentile range to define outliers.
-
-    Returns:
-        np.ndarray: A boolean array indicating which points are inliers (True) and which are outliers (False).
-    """
-    if point_pos.shape[0] < 3: 
-        return point_pos
-    pt_stat = compute_point_cloud_basic_statistics(point_pos, compute_cov_Q=True, compute_eig_Q=True)
-
-    pt_mean = np.mean(point_pos, axis=0)
-    pt_xyz_dm = point_pos - pt_mean
-    pt_vec = pt_stat['eig_v']
-    pt_std = pt_stat['eig_s']
-    pt_std_ratio = pt_std[1] / pt_std[0]
-    if pt_std_ratio > 0.5: 
-        print(f"Warning: the second PC explains {pt_std_ratio:.3f} of the first PC, indicating a planar distribution of synapses.")
-    # compute the residual 
-    pt_res_dist = np.sqrt(np.sum((pt_xyz_dm @ pt_vec[:, 1:]) ** 2, axis=1))
-    pt_res_lim = compute_percentile_outlier_threshold(pt_res_dist, ipr=ipr)
-    pt_is_inlier_Q = (pt_res_dist <= pt_res_lim[1])
-    point_pos = point_pos[pt_is_inlier_Q, :]
-    
-    return point_pos
-
-
-def eigs_to_cov(eig_sigma, eig_v): 
-    cov = eig_v @ np.diag(eig_sigma ** 2) @ eig_v.T
-    return cov
-
-def compute_point_cloud_dist_from_stat(stat1, stat2, project_to_eig1=True):
-    """
-    Compute the distance between two point cloud statistics from compute_point_cloud_basic_statistics
-    Inputs: 
-        - stat1: The first point cloud statistics
-        - stat2: The second point cloud statistics.
-    """
-    dist_info = {}
-    # Chi-squared test for 3D points
-    dist_info['d_mu'] = stat2['mean'] - stat1['mean']
-    dist_info['l_mu'] = np.linalg.norm(dist_info['d_mu'])
-    dist_info['n_1'] = stat1['n']
-    dist_info['n_2'] = stat2['n']
-    if stat1['n'] < 2 and stat2['n'] < 2:
-        dist_info['V'] = np.full((3, 3), np.nan)
-    elif stat1['n'] < 2:
-        sig = stat2['cov']
-    elif stat2['n'] < 2: 
-        sig = stat1['cov']
-    else:
-        sig = stat1['cov'] / stat1['n'] + stat2['cov'] / stat2['n']
-    dist_info['T2'] = dist_info['d_mu'] @ np.linalg.pinv(sig) @ dist_info['d_mu']
-    dist_info['D2'] = dist_info['d_mu'] @ np.linalg.pinv(stat1['cov']) @ dist_info['d_mu']
-    # Project the mean from the second point cloud into the eigenvector 
-    # of the first point cloud
-    if project_to_eig1: 
-        if 'eig_v' in stat1: 
-            eig_v = stat1['eig_v']
-            eig_s = stat1['eig_s']
-        else: 
-            eig_val, eig_v = np.linalg.eig(stat1['cov'])
-            sorted_indices = np.argsort(eig_val)[::-1]
-            eig_s = np.sqrt(eig_val[sorted_indices])
-            eig_v = eig_v[:, sorted_indices]
-        # Unify eigenvetor direction
-        eig_v_d = eig_v.copy()
-        for i in range(eig_v.shape[1]):
-            tmp_idx = np.argmax(np.abs(eig_v_d[:, i]))
-            if eig_v_d[tmp_idx, i] < 0:
-                eig_v_d[:, i] *= -1
-        dist_info['eig_v_1'] = eig_v_d
-        dist_info['eig_s_1'] = eig_s
-        dist_info['d_mu2eig_v1'] = eig_v_d.T @ dist_info['d_mu']
-
-    return dist_info
-
 def rebin_histogram(
     bin_val: np.ndarray,
     count: np.ndarray,
@@ -657,4 +519,149 @@ def rebin_histogram(
     else:
         return new_mass
     
+#region Point cloud
+def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_Q=True, 
+                                         compute_eig_Q=True):
+    """
+    Compute basic statistics for a d-dimensional point cloud.
 
+    Args:
+        point_cloud (np.ndarray): A (N, d) array of points.
+        weights (np.ndarray, optional): A (N,) array of weights for each point.
+
+    Returns:
+        dict: A dictionary containing the mean and covariance of the point cloud.
+            - mean: The mean of the point cloud (d-dimensional).
+            - cov: The covariance matrix of the point cloud (d x d).
+            - eig_s: The square root of eigenvalues of the covariance matrix (d-dimensional), sorted in descending order.
+            - eig_v: The eigenvectors of the covariance matrix (d x d). Each column is the right eigenvector
+    """
+    compute_cov_Q = compute_cov_Q or compute_eig_Q
+
+    point_cloud = np.atleast_2d(np.asarray(point_cloud))
+    assert np.isreal(point_cloud).all(), "Point cloud contains non-real values"
+    is_valid_Q = np.isfinite(point_cloud).all(axis=1)
+    point_cloud = point_cloud[is_valid_Q]
+    if weights is not None:
+        weights = np.atleast_1d(np.asarray(weights))
+        weights = weights[is_valid_Q]
+
+    num_pts, num_d = point_cloud.shape
+    stats = {'n': num_pts,
+             'mean': np.full((num_d,), np.nan),
+             'cov': np.full((num_d, num_d), np.nan), 
+             'eig_s': np.full((num_d,), np.nan), 
+             'eig_v': np.full((num_d, num_d), np.nan), 
+             'tot_weight': np.nansum(weights) if weights is not None else num_pts}
+    if num_pts > 0: 
+        stats['mean'] = np.average(point_cloud, axis=0, weights=weights)
+        if compute_cov_Q: 
+            if num_pts > 1:
+                stats['cov'] = np.cov(point_cloud - stats['mean'], rowvar=False, fweights=weights, ddof=0)
+            else: 
+                stats['cov'] = np.zeros((num_d, num_d))
+            if compute_eig_Q: 
+                if num_pts > 1: 
+                    eig_val, eig_vec = np.linalg.eig(stats['cov'])
+                    if np.iscomplex(eig_val).any():
+                        eig_vec = np.real(eig_vec)
+                        eig_val = np.real(eig_val)
+                    # sort eigenvalue in descending order
+                    sorted_indices = np.argsort(eig_val)[::-1]
+                    stats['eig_s'] = np.sqrt(eig_val[sorted_indices])
+                    stats['eig_v'] = eig_vec[:, sorted_indices]
+                else: 
+                    stats['eig_s'] = np.zeros((num_d,))
+                    stats['eig_v'] = np.eye(num_d)
+            else: 
+                stats.pop('eig_s', None)
+                stats.pop('eig_v', None)
+        else: 
+            stats.pop('cov', None)
+
+    return stats
+
+def point_cloud_linear_outlier_rejection(point_pos, ipr=1.5): 
+    """
+    Reject outliers in a point cloud based on the inter-percentile range (IPR) method.
+    Compute PCA of the point cloud, define residual as the length of the points 
+    projected orthogonal to the first principal component, and remove points with
+    residuals outside the IPR-defined range.
+    Args:
+        point_pos (np.ndarray): A (N, d) array of points.
+        ipr (float): The multiplier for the inter-percentile range to define outliers.
+
+    Returns:
+        np.ndarray: A boolean array indicating which points are inliers (True) and which are outliers (False).
+    """
+    if point_pos.shape[0] < 3: 
+        return point_pos
+    pt_stat = compute_point_cloud_basic_statistics(point_pos, compute_cov_Q=True, compute_eig_Q=True)
+
+    pt_mean = np.mean(point_pos, axis=0)
+    pt_xyz_dm = point_pos - pt_mean
+    pt_vec = pt_stat['eig_v']
+    pt_std = pt_stat['eig_s']
+    pt_std_ratio = pt_std[1] / pt_std[0]
+    if pt_std_ratio > 0.5: 
+        print(f"Warning: the second PC explains {pt_std_ratio:.3f} of the first PC, indicating a planar distribution of synapses.")
+    # compute the residual 
+    pt_res_dist = np.sqrt(np.sum((pt_xyz_dm @ pt_vec[:, 1:]) ** 2, axis=1))
+    pt_res_lim = compute_percentile_outlier_threshold(pt_res_dist, ipr=ipr)
+    pt_is_inlier_Q = (pt_res_dist <= pt_res_lim[1])
+    point_pos = point_pos[pt_is_inlier_Q, :]
+    
+    return point_pos
+
+def eigs_to_cov(eig_sigma, eig_v): 
+    cov = eig_v @ np.diag(eig_sigma ** 2) @ eig_v.T
+    return cov
+
+def compute_point_cloud_dist_from_stat(stat1, stat2, project_to_eig1=True):
+    """
+    Compute the distance between two point cloud statistics from compute_point_cloud_basic_statistics
+    Inputs: 
+        - stat1: The first point cloud statistics
+        - stat2: The second point cloud statistics.
+    """
+    dist_info = {}
+    # Chi-squared test for 3D points
+    dist_info['d_mu'] = stat2['mean'] - stat1['mean']
+    dist_info['l_mu'] = np.linalg.norm(dist_info['d_mu'])
+    dist_info['n_1'] = stat1['n']
+    dist_info['n_2'] = stat2['n']
+    if stat1['n'] < 2 and stat2['n'] < 2:
+        dist_info['V'] = np.full((3, 3), np.nan)
+    elif stat1['n'] < 2:
+        sig = stat2['cov']
+    elif stat2['n'] < 2: 
+        sig = stat1['cov']
+    else:
+        sig = stat1['cov'] / stat1['n'] + stat2['cov'] / stat2['n']
+    dist_info['T2'] = dist_info['d_mu'] @ np.linalg.pinv(sig) @ dist_info['d_mu']
+    dist_info['D2'] = dist_info['d_mu'] @ np.linalg.pinv(stat1['cov']) @ dist_info['d_mu']
+    # Project the mean from the second point cloud into the eigenvector 
+    # of the first point cloud
+    if project_to_eig1: 
+        if 'eig_v' in stat1: 
+            eig_v = stat1['eig_v']
+            eig_s = stat1['eig_s']
+        else: 
+            eig_val, eig_v = np.linalg.eig(stat1['cov'])
+            sorted_indices = np.argsort(eig_val)[::-1]
+            eig_s = np.sqrt(eig_val[sorted_indices])
+            eig_v = eig_v[:, sorted_indices]
+        # Unify eigenvetor direction
+        eig_v_d = eig_v.copy()
+        for i in range(eig_v.shape[1]):
+            tmp_idx = np.argmax(np.abs(eig_v_d[:, i]))
+            if eig_v_d[tmp_idx, i] < 0:
+                eig_v_d[:, i] *= -1
+        dist_info['eig_v_1'] = eig_v_d
+        dist_info['eig_s_1'] = eig_s
+        dist_info['d_mu2eig_v1'] = eig_v_d.T @ dist_info['d_mu']
+
+    return dist_info
+
+
+#endregion

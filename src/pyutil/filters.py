@@ -1,6 +1,7 @@
 import scipy.ndimage as ndi
 import dask.array as da 
 import numpy as np
+import pandas as pd
 # import cv2
 
 def medfilt3(block, size=3, chunks=None):
@@ -68,7 +69,10 @@ def central_difference_2d(X, axis=0):
     
     return dX
 
-
-
-
-
+def moving_average_1d(x, window_size, min_periods=None):
+    if min_periods is None:
+        min_periods = window_size
+    x = pd.Series(x)
+    moving_avg = x.rolling(window=window_size, min_periods=min_periods,
+                            center=True).mean().to_numpy()
+    return moving_avg
