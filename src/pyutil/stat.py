@@ -549,10 +549,12 @@ def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_
     num_pts, num_d = point_cloud.shape
     stats = {'n': num_pts,
              'mean': np.full((num_d,), np.nan),
-             'cov': np.full((num_d, num_d), np.nan), 
-             'eig_s': np.full((num_d,), np.nan), 
-             'eig_v': np.full((num_d, num_d), np.nan), 
              'tot_weight': np.nansum(weights) if weights is not None else num_pts}
+    if compute_cov_Q: 
+        stats['cov'] = np.full((num_d, num_d), np.nan)
+    if compute_eig_Q: 
+        stats['eig_s'] = np.full((num_d,), np.nan)
+        stats['eig_v'] = np.full((num_d, num_d), np.nan)
     if num_pts > 0: 
         stats['mean'] = np.average(point_cloud, axis=0, weights=weights)
         if compute_cov_Q: 
@@ -560,24 +562,20 @@ def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_
                 stats['cov'] = np.cov(point_cloud - stats['mean'], rowvar=False, fweights=weights, ddof=0)
             else: 
                 stats['cov'] = np.zeros((num_d, num_d))
-            if compute_eig_Q: 
-                if num_pts > 1: 
-                    eig_val, eig_vec = np.linalg.eig(stats['cov'])
-                    if np.iscomplex(eig_val).any():
-                        eig_vec = np.real(eig_vec)
-                        eig_val = np.real(eig_val)
-                    # sort eigenvalue in descending order
-                    sorted_indices = np.argsort(eig_val)[::-1]
-                    stats['eig_s'] = np.sqrt(eig_val[sorted_indices])
-                    stats['eig_v'] = eig_vec[:, sorted_indices]
-                else: 
-                    stats['eig_s'] = np.zeros((num_d,))
-                    stats['eig_v'] = np.eye(num_d)
+        
+        if compute_eig_Q: 
+            if num_pts > 1: 
+                eig_val, eig_vec = np.linalg.eig(stats['cov'])
+                if np.iscomplex(eig_val).any():
+                    eig_vec = np.real(eig_vec)
+                    eig_val = np.real(eig_val)
+                # sort eigenvalue in descending order
+                sorted_indices = np.argsort(eig_val)[::-1]
+                stats['eig_s'] = np.sqrt(eig_val[sorted_indices])
+                stats['eig_v'] = eig_vec[:, sorted_indices]
             else: 
-                stats.pop('eig_s', None)
-                stats.pop('eig_v', None)
-        else: 
-            stats.pop('cov', None)
+                stats['eig_s'] = np.zeros((num_d,))
+                stats['eig_v'] = np.eye(num_d)
 
     return stats
 
@@ -663,5 +661,51 @@ def compute_point_cloud_dist_from_stat(stat1, stat2, project_to_eig1=True):
 
     return dist_info
 
+import numpy as np
+
+def otsu_threshold_from_hist(counts: np.ndarray, edges: np.ndarray, 
+                             max_margin_Q=False) -> float:
+    """
+    Estimate Otsu threshold from a histogram (counts, edges) returned by np.histogram.
+
+    Assumptions:
+      - Uniform bin width.
+      - Threshold is returned at bin-width resolution (i.e., one of the bin edges).
+
+    Returns:
+      - threshold value (a bin edge) that maximizes between-class variance.
+    """
+    counts = np.asarray(counts).astype(np.float32)
+    edges = np.asarray(edges)
+
+    if counts.ndim != 1 or edges.ndim != 1 or edges.size != counts.size + 1:
+        raise ValueError("Expected 1D counts and edges with len(edges) == len(counts) + 1.")
+
+    w = counts
+    # Cumulative class weights: w0 for [0..i], w1 for [i+1..end]
+    w0 = np.cumsum(counts)
+    total = w0[-1]
+    w1 = total - w0
+    # Cumulative class means numerator: sum(w * x)
+    centers = (edges[:-1] + edges[1:]) * 0.5
+    m0_num = np.cumsum(w * centers)
+    m_total = m0_num[-1]
+    # Between-class variance (Otsu):
+    # sigma_b^2 = (m_total * w0 - m0_num * total)^2 / (w0 * w1)
+    denom = w0 * w1
+    sigma_b2 = np.zeros_like(denom, dtype=np.float64)
+    valid = denom > 0
+    diff = (m_total * w0[valid] - m0_num[valid] * total)
+    sigma_b2[valid] = (diff * diff) / denom[valid]
+
+    # Best split index i means threshold at edges[i+1]
+    if max_margin_Q:
+        max_sig = np.max(sigma_b2)
+        max_idxs = np.flatnonzero(np.isclose(sigma_b2, max_sig, atol=1e-8, rtol=0))
+        i = max_idxs[len(max_idxs) // 2]  # pick middle if multiple
+    else: 
+        i = int(np.argmax(sigma_b2))
+
+    return float(edges[i + 1])
 
 #endregion

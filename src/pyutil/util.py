@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import datetime
 
 
 def mask_data_in_dict(data, mask, mask_priority=None):
@@ -179,6 +180,7 @@ def dict_of_dict_to_dict_of_array(dod, to_numpy_Q=True, key_name='key',
 
     if to_numpy_Q: 
         for k, v in result.items():
+            # np.asarray([np.uint64, ..., int]) can be turned into np.float64...
             result[k] = np.asarray(v)
     return result
 
@@ -353,4 +355,18 @@ class ScalarDict:
         return self.get_value(rid)
         
 
-        
+def get_current_datestring(format="%Y%m%d_%H%M%S"):
+    return datetime.datetime.now().strftime(format)
+
+def construct_numpy_obj_array(arrays): 
+    """Construct a numpy object array from a list of arrays.
+    Input:
+        arrays: list of numpy arrays with the same shape
+    Output:
+        obj_array: numpy object array with the same shape as the input arrays,
+                   where each element is a tuple of the corresponding elements in the input arrays. 
+    """
+    num_elem = len(arrays)
+    obj_array = np.empty(num_elem, dtype=object)
+    obj_array[:] = arrays
+    return obj_array                

@@ -201,10 +201,22 @@ def compute_three_view_mip(data):
     mip['zy'] = np.amax(data, axis=2)
     return mip
 
-def imfuse_2d(im1, im2, method='stack'):
+def mat2uint8im(mat, vmin=None, vmax=None, gamma=1.0):
+    mat = mat.astype(np.float32)
+    if vmin is None: 
+        vmin = mat.min()
+    if vmax is None: 
+        vmax = mat.max()
+    mat = np.clip(mat, vmin, vmax)
+    mat = (mat - vmin) / (vmax - vmin + 1e-8)  # Avoid division by zero
+    if gamma != 1.0:
+        mat = mat ** gamma
+    return (mat * 255).astype(np.uint8)
+
+def imfuse_2d(im1, im2, method='matlab', gamma=1.0):
     # Assume uint16 at the moment. Convert to 8 bit 
-    im1 = (im1 / 256).astype('uint8')
-    im2 = (im2 / 256).astype('uint8')
+    im1 = mat2uint8im(im1, gamma=gamma)
+    im2 = mat2uint8im(im2, gamma=gamma)
     if method == 'stack':
         return np.dstack((im1, im2, im1))
     elif method == 'matlab':

@@ -104,7 +104,7 @@ def write_data(fp, data, verboseQ=False):
         write_h5(fp, data)
     elif ext == '.json':
         write_json(fp, data)
-    elif ext == '.pickle':
+    elif ext in ['.pickle', '.pkl']:
         write_pkl(fp, data)
     elif ext in ('.txt', '.csv'):
         write_text(fp, data)
@@ -116,6 +116,8 @@ def write_data(fp, data, verboseQ=False):
         write_npz(fp, data)
     elif ext == '.parquet':
         write_parquet(fp, data)       
+    elif ext == '.npy': 
+        np.save(fp, data)
     else:
         raise "Unrecognized file type"
     if verboseQ:
@@ -123,7 +125,7 @@ def write_data(fp, data, verboseQ=False):
 
 def load_data(fp, arg=None):
     fn, ext = os.path.splitext(fp)
-    if ext == '.pickle':
+    if ext in ['.pickle', '.pkl']:
         return load_pickle(fp)
     elif ext == '.h5':
         return load_h5(fp)
@@ -140,8 +142,10 @@ def load_data(fp, arg=None):
             return load_nii(fp)
         else:
             raise "Unrecognized file type"
-    elif ext == '.npz':
+    elif ext in ['.npz']:
         return load_npz(fp)
+    elif ext in ['.npy']:
+        return np.load(fp, allow_pickle=True)
     elif ext == '.parquet':
         return pd.read_parquet(fp)
     else: 

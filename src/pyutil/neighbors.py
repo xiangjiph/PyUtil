@@ -3,6 +3,7 @@ from scipy.sparse import coo_matrix
 import skimage as ski
 import scipy.ndimage as ndi
 import warnings
+from . import util 
 
 def compute_voxel_offseted_linear_indices(pos_ind, mask_size, offset=1):
     pos_ind = np.array(pos_ind) if isinstance(pos_ind, (list, tuple)) else pos_ind
@@ -135,7 +136,8 @@ def bwconncomp(mask, connectivity=None, return_ind_Q=True, \
     result = {}
     result['image_size'] = mask.shape
     result['num_cc'] = len(cc_prop)
-    result['pixel_sub'] = np.array([cc.coords for cc in cc_prop], dtype=object)
+    result['pixel_sub'] = util.construct_numpy_obj_array([cc.coords for cc in cc_prop])
+    # result['pixel_sub'] = np.array([cc.coords for cc in cc_prop], dtype=object)
     if return_ind_Q:
         result['pixel_indices'] = np.array([np.ravel_multi_index([s[:, i] for i in range(s.shape[1])], mask.shape) 
                                             for s in result['pixel_sub']], dtype=object)
