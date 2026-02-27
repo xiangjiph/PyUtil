@@ -1,3 +1,4 @@
+from glob import glob
 from scipy.io import savemat, loadmat
 import os, sys, platform
 import h5py, json, pickle
@@ -564,6 +565,13 @@ def filepath_correct_filesep(fp):
         return fp.replace("\\", "/")
     elif platform.system() == 'Windows':
         return fp.replace("/", "\\")
+    
+def get_most_recent_file(fp_pattern):
+    files = glob(fp_pattern)
+    if not files:
+        raise FileNotFoundError(f"No files found matching pattern: {fp_pattern}")
+    most_recent_file = max(files, key=os.path.getctime)
+    return most_recent_file
 #################
 #endregion
 #################

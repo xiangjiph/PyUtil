@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial import KDTree
 
+from .. import stat
+
 class PointCloud3DSurfaceFit():
     def __init__(self, points_xyz: np.ndarray, 
                  R=None, t=None):
@@ -115,6 +117,37 @@ class PointCloud3DSurfaceFit():
         dw_dv = c + e * u + 2 * f * v
         dw_dv = dw_dv.reshape(np.asarray(u).shape)
         return dw_dv
+    
+    @staticmethod
+    def normal_vector(u, v, coeffs): 
+        dw_du = PointCloud3DSurfaceFit.df_du(u, v, coeffs)
+        dw_dv = PointCloud3DSurfaceFit.df_dv(u, v, coeffs)
+        n = np.stack([-dw_du, -dw_dv, np.ones_like(dw_du)], axis=-1)
+        n_norm = np.linalg.norm(n, axis=-1, keepdims=True)
+        n_unit = n / n_norm
+        return n_unit
+    
+    @staticmethod
+    def tangent_vectors(u, v, coeffs):
+        dw_du = PointCloud3DSurfaceFit.df_du(u, v, coeffs)
+        dw_dv = PointCloud3DSurfaceFit.df_dv(u, v, coeffs)
+        t_u = np.stack([np.ones_like(dw_du), np.zeros_like(dw_du), dw_du], axis=-1)
+        t_v = np.stack([np.zeros_like(dw_dv), np.ones_like(dw_dv), dw_dv], axis=-1)
+        t_u_norm = np.linalg.norm(t_u, axis=-1, keepdims=True)
+        e1 = t_u / t_u_norm
+        e2 = t_v - np.sum(t_v * e1, axis=-1, keepdims=True) * e1
+        e2 = e2 / np.linalg.norm(e2, axis=-1, keepdims=True)
+        return e1, e2
+    
+    @staticmethod
+    def uvw_to_tangent_plane(uvw, uvw0, coeffs):
+        """Project points in local uvw coordinates to the tangent plane at uvw0."""
+        t_u, t_v = PointCloud3DSurfaceFit.tangent_vectors(uvw0[0], uvw0[1], coeffs)
+        delta_uvw = uvw - uvw0
+        proj_u = np.sum(delta_uvw * t_u, axis=-1)
+        proj_v = np.sum(delta_uvw * t_v, axis=-1)
+        proj_uv = np.column_stack([proj_u, proj_v])
+        return proj_uv
 
     @staticmethod
     def uv_to_polynomial_array(u, v):
@@ -288,6 +321,7 @@ class PointCloud3DSurfaceFit():
         
         if vis_frame == 'local':
             if vis_pts_Q:
+                # c = self.residuals_w
                 ax.scatter(L[:, 0], L[:, 1], L[:, 2], s=1, alpha=0.9)
             ax.plot_surface(U, V, W, alpha=0.25, linewidth=0, label=label)
         else:
@@ -301,13 +335,13 @@ class PointCloud3DSurfaceFit():
         ax.set_zlabel("Z")
         ax.set_title(f"Quadratic surface fit in PCA-aligned {vis_frame} frame")
 
-        try:
-            if vis_frame == 'local':
-                ax.set_box_aspect([np.ptp(L[:, 0]), np.ptp(L[:, 1]), np.ptp(L[:, 2])])
-            else:
-                ax.set_box_aspect([np.ptp(P[:, 0]), np.ptp(P[:, 1]), np.ptp(P[:, 2])])
-        except Exception:
-            pass
+        # try:
+        #     if vis_frame == 'local':
+        #         ax.set_box_aspect([np.ptp(L[:, 0]), np.ptp(L[:, 1]), np.ptp(L[:, 2])])
+        #     else:
+        #         ax.set_box_aspect([np.ptp(P[:, 0]), np.ptp(P[:, 1]), np.ptp(P[:, 2])])
+        # except Exception:
+        #     pass
 
         plt.tight_layout()
         return fig, ax
@@ -500,7 +534,6 @@ class PointCloudGroup:
                   } 
         return result
     
-
 def grid_centroids(points: np.ndarray,
                    grid_size: tuple[int, int, int],
                    origin: np.ndarray | None = None,
@@ -597,3 +630,32 @@ def grid_centroids(points: np.ndarray,
     if return_counts:
         return centroids, occ_ijk, counts[occupied]
     return centroids, occ_ijk
+
+def select_points_near_pc1(pts, ipr=1.5, max_dist_th=None): 
+    pts = np.asarray(pts)
+    assert pts.shape[1] == 3, 'Expect 3D point cloud'
+    pts_stat = stat.compute_point_cloud_basic_statistics(pts)
+    pts_uvw = (pts - pts_stat['mean']) @ pts_stat['eig_v']
+    off_axis_n = np.linalg.norm(pts_uvw[:, 1:], axis=1)
+    off_axis_th = stat.compute_percentile_outlier_threshold(off_axis_n, 
+                                                            ipr=ipr)
+    off_axis_th = np.minimum(off_axis_th[1], max_dist_th) if max_dist_th is not None else off_axis_th[1]
+    off_axis_outlier_Q = off_axis_n > off_axis_th
+    
+    pts_stat['pts_uvw'] = pts_uvw
+    pts_stat['off_axis_len'] = off_axis_n
+    pts_stat['off_axis_th'] = off_axis_th
+    pts_stat['off_axis_outlier_Q'] = off_axis_outlier_Q
+    pts_stat['num_outliers'] = off_axis_outlier_Q.sum()
+    pts_stat['inlier_pts'] = pts[~off_axis_outlier_Q]
+
+    return pts_stat
+
+def select_points_near_pc1_iterative(pts, ipr=1.5, max_iter=10, max_dist_th=None): 
+    pts_stat = select_points_near_pc1(pts, ipr=ipr, max_dist_th=max_dist_th)
+    for i in range(max_iter):
+        if pts_stat['num_outliers'] == 0:
+            break
+        pts_stat = select_points_near_pc1(pts_stat['inlier_pts'], ipr=ipr, 
+                                          max_dist_th=max_dist_th)
+    return pts_stat

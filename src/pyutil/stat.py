@@ -708,4 +708,18 @@ def otsu_threshold_from_hist(counts: np.ndarray, edges: np.ndarray,
 
     return float(edges[i + 1])
 
+def percentile(x, q, **kwargs): 
+    """ Add support for complex number by computing percentile separately 
+    for real and imaginary part.
+    
+    """
+    x = np.asarray(x)
+    if np.any(np.iscomplex(x)):
+        xr = np.real(x)
+        xi = np.imag(x)
+        prctile_r = np.nanpercentile(xr, q, **kwargs)
+        prctile_i = np.nanpercentile(xi, q, **kwargs)
+        return prctile_r + 1j * prctile_i
+    else:
+        return np.nanpercentile(x, q, **kwargs)
 #endregion
