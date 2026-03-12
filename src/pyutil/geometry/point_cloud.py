@@ -69,6 +69,14 @@ class PointCloud3DSurfaceFit():
         uvw = self.xyz_to_uvw(xyz)
         res = self._uvw_to_residual(uvw)
         return res
+    
+    def remove_xyz_by_residual_threshold(self, xyz, inliner_range, return_res_Q=False):
+        res = self.compute_xyz_residual(xyz)
+        inlier_Q = (res >= inliner_range[0]) & (res <= inliner_range[1])
+        if return_res_Q:
+            return xyz[inlier_Q], res[inlier_Q]
+        else:
+            return xyz[inlier_Q]
 
     def _uvw_to_residual(self, uvw):
         w_hat = self.f(uvw[:, 0], uvw[:, 1], self.coeffs)
@@ -333,7 +341,7 @@ class PointCloud3DSurfaceFit():
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
         ax.set_zlabel("Z")
-        ax.set_title(f"Quadratic surface fit in PCA-aligned {vis_frame} frame")
+        ax.set_title(f"Quadratic surface fit in {vis_frame} frame")
 
         # try:
         #     if vis_frame == 'local':
@@ -533,6 +541,10 @@ class PointCloudGroup:
                   'xyz_nm': nn_pt_xyz_nm # nearest points in each group to the query points
                   } 
         return result
+    
+    def get_surface_rasidual_range(self, ipr=1.5): 
+        res_range = stat.compute_percentile_outlier_threshold(self.residuals_w, ipr=ipr)
+        return res_range
     
 def grid_centroids(points: np.ndarray,
                    grid_size: tuple[int, int, int],

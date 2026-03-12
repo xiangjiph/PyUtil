@@ -1,32 +1,41 @@
 import numpy as np
 import scipy.spatial as sps
+from sklearn.cluster import KMeans
 from scipy.stats import binned_statistic
 import matplotlib.pyplot as plt
 import pyutil.stat as py_stat
 from pyutil.geometry.point_cloud import PointCloud3DSurfaceFit
-
+import pyutil
 
 
 def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1): 
+    pt_set_1 = pt_set_1[np.all(np.isfinite(pt_set_1), axis=1)]
+    pt_set_2 = pt_set_2[np.all(np.isfinite(pt_set_2), axis=1)]
     kdt_1 = sps.cKDTree(pt_set_1)
     kdt_2 = sps.cKDTree(pt_set_2)
+    num_dim = pt_set_1.shape[1]
     # set 1 autocorrelation
     self_dists, self_idx = kdt_1.query(pt_set_1, k=num_auto_nb+1)
     self_idx = self_idx[:, 1:]  # remove self
-    acorr_nb_vec_1 = np.zeros((pt_set_1.shape[0], num_auto_nb, 3))
+    acorr_nb_vec_1 = np.zeros((pt_set_1.shape[0], num_auto_nb, num_dim))
     for i in range(pt_set_1.shape[0]):
         acorr_nb_vec_1[i] = pt_set_1[self_idx[i]] - pt_set_1[i]
 
     # set 2 in set 1 cross-correlation
     dists, idxs = kdt_1.query(pt_set_2, k=num_nb)
-    xcorr_vec = np.zeros((pt_set_2.shape[0], num_nb, 3))
+    xcorr_vec_2i1 = np.zeros((pt_set_2.shape[0], num_nb, num_dim))
     for i in range(pt_set_2.shape[0]):
-        xcorr_vec[i] = pt_set_1[idxs[i]] - pt_set_2[i]
+        xcorr_vec_2i1[i] = pt_set_1[idxs[i]] - pt_set_2[i]
+    # set 1 in set 2 cross-correlation
+    dists, idxs = kdt_2.query(pt_set_1, k=num_nb)
+    xcorr_vec_1i2 = np.zeros((pt_set_1.shape[0], num_nb, num_dim))
+    for i in range(pt_set_1.shape[0]):
+        xcorr_vec_1i2[i] = pt_set_2[idxs[i]] - pt_set_1[i]
 
     # set 2 autocorrelation
     self_dists, self_idx = kdt_2.query(pt_set_2, k=num_auto_nb+1)
     self_idx = self_idx[:, 1:]  # remove self
-    acorr_nb_vec_2 = np.zeros((pt_set_2.shape[0], num_auto_nb, 3))
+    acorr_nb_vec_2 = np.zeros((pt_set_2.shape[0], num_auto_nb, num_dim))
     for i in range(pt_set_2.shape[0]):
         acorr_nb_vec_2[i] = pt_set_2[self_idx[i]] - pt_set_2[i]
 
@@ -38,13 +47,17 @@ def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1):
     # y_range = np.percentile(tmp_y, [0.5, 99.5])
     y_range = np.percentile(acorr_nb_vec_2[:, :, 1].flatten(), [0.5, 99.5])
     y_range = np.asarray([-1, 1]) * max(abs(y_range))
-    num_bins = [20, 20]
+    num_bins = [21, 21]
     # hist_count is in [x, y] order, which is different from the usual [row, col] order of images.
     acorr_hist_1, x_edge, y_edge = np.histogram2d(tmp_x, tmp_y, bins=num_bins,
                                                         range=[x_range, y_range])
-    tmp_u = xcorr_vec[:, :, 0].flatten()
-    tmp_v = xcorr_vec[:, :, 1].flatten()
-    xcorr_hist, _, _ = np.histogram2d(tmp_u, tmp_v, bins=num_bins,
+    tmp_u = xcorr_vec_2i1[:, :, 0].flatten()
+    tmp_v = xcorr_vec_2i1[:, :, 1].flatten()
+    xcorr_hist_2i1, _, _ = np.histogram2d(tmp_u, tmp_v, bins=num_bins,
+                                            range=[x_range, y_range])
+    tmp_u = xcorr_vec_1i2[:, :, 0].flatten()
+    tmp_v = xcorr_vec_1i2[:, :, 1].flatten()
+    xcorr_hist_1i2, _, _ = np.histogram2d(tmp_u, tmp_v, bins=num_bins,
                                             range=[x_range, y_range])
 
     tmp_u_self = acorr_nb_vec_2[:, :, 0].flatten()
@@ -53,10 +66,12 @@ def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1):
                                             range=[x_range, y_range])
     result = {
         'acorr_nb_vec_1': acorr_nb_vec_1,
-        'xcorr_vec': xcorr_vec,
+        'xcorr_vec_2i1': xcorr_vec_2i1,
+        'xcorr_vec_1i2': xcorr_vec_2i1,
         'acorr_nb_vec_2': acorr_nb_vec_2,
         'acorr_hist_1': acorr_hist_1,   
-        'xcorr_hist': xcorr_hist,
+        'xcorr_hist_2i1': xcorr_hist_2i1,
+        'xcorr_hist_1i2': xcorr_hist_1i2,
         'acorr_hist_2': acorr_hist_2,
         'x_range': x_range,
         'y_range': y_range,
@@ -122,51 +137,6 @@ def compute_orientation_order(data_pts, max_dist, max_knn, m_list=None,
         'm_oo_nn': pt_max_oo_nb,
         'm_oo_n': pt_oo_n,
     }
-    return result
-
-def compute_radial_distribution_function(pts, max_dist, max_knn, num_bins, remove_self_Q=True): 
-    pts = np.asarray(pts).astype(np.float32)
-
-    hist_bins = np.arange(0, max_dist+1e-9, max_dist/num_bins)
-    hist_bin_val = (hist_bins[:-1] + hist_bins[1:]) / 2
-    hist_bin_area = np.pi * (hist_bins[1:]**2 - hist_bins[:-1]**2)
-    pts_r_counts = np.full((pts.shape[0], num_bins), fill_value=np.nan)
-
-    pt_kdt = sps.cKDTree(pts)
-
-    for i, tmp_pt in enumerate(pts):
-        tmp_dist, tmp_idx = pt_kdt.query(tmp_pt, k=max_knn, distance_upper_bound=max_dist)
-        tmp_valid_Q = tmp_dist <= max_dist
-        if remove_self_Q:
-            assert tmp_dist[0] == 0, 'The closest point should be itself with distance 0.'
-            tmp_valid_Q[0] = False
-        if tmp_valid_Q[-1] == True: 
-            print(f'Warning: point {i} has more than {max_knn} neighbors within {max_dist} distance. Consider increasing max_knn or max_dist.')
-        tmp_dist = tmp_dist[tmp_valid_Q]
-        tmp_idx = tmp_idx[tmp_valid_Q]
-        tmp_counts = np.histogram(tmp_dist, bins=hist_bins)[0].astype(np.float32)
-        # set the trailing 0 to nan
-        for j in range(len(tmp_counts)-1, -1, -1):
-            if tmp_counts[j] > 0:
-                break
-            else:
-                tmp_counts[j] = np.nan
-        pts_r_counts[i] = tmp_counts
-    
-    avg_r_counts = np.nanmean(pts_r_counts, axis=0)
-    avg_r_den = avg_r_counts / hist_bin_area
-    bond_length = hist_bin_val[np.argmax(avg_r_den)]
-
-    result = {
-        'hist_bins': hist_bins,
-        'hist_bin_val': hist_bin_val,
-        'hist_bin_area': hist_bin_area,
-        'pts_r_counts': pts_r_counts,
-        'avg_r_counts': avg_r_counts, 
-        'avg_r_density': avg_r_den, 
-        'peak_dist': bond_length
-    }
-
     return result
 
 def compute_orientation_order_correlation(data_pts, pt_ori_order, 
@@ -252,7 +222,7 @@ def analyze_orientation_order_correlation(data_pts, oo_knn, oo_max_dist,
             print(f"No points with m_oo_nn={m}, skipping analysis.")
 
     return pt_oo_info, m_oo_corr    
-    
+
 def vis_orientation_order_correlation(m_oo_corr, pt_oo_info, x_label='r (nm)', 
                                       y_label='Orientation order correlation'):
     
@@ -280,7 +250,8 @@ def vis_orientation_order_correlation(m_oo_corr, pt_oo_info, x_label='r (nm)',
     a[1].set_ylim(-0.05, 1.05)
     return f, a
 
-def vis_syn_ctr_pos(ref_pts, ct_pts, ref_ct=None, ct=None): 
+def vis_syn_ctr_pos(ref_pts, ct_pts, ref_ct=None, ct=None, 
+                    x_label='u (nm)', y_label='v (nm)'): 
     f, a = plt.subplots(1, 2, figsize=(12, 6))
     a[0].scatter(ct_pts[:, 0], ct_pts[:, 1], s=10, label=ct, alpha=0.5)
     a[0].scatter(ref_pts[:, 0], ref_pts[:, 1],
@@ -288,42 +259,44 @@ def vis_syn_ctr_pos(ref_pts, ct_pts, ref_ct=None, ct=None):
     a[0].set_aspect('equal')
 
     a[0].legend()
-    a[0].set_xlabel('u (nm)')
-    a[0].set_ylabel('v (nm)')
+    a[0].set_xlabel(x_label)
+    a[0].set_ylabel(y_label)
     a[0].grid()
 
     a[1].scatter(ct_pts[:, 0], ct_pts[:, 1], s=10, label=ct, alpha=0.5)
     a[1].set_aspect('equal')
     a[1].legend()
-    a[1].set_xlabel('u (nm)')
-    a[1].set_ylabel('v (nm)')
+    a[1].set_xlabel(x_label)
+    a[1].set_ylabel(y_label)
     a[1].grid()
     f.tight_layout()
     return f, a
 
-def vis_two_lattice_xcorr(result):
+def vis_two_lattice_xcorr(result, x_label='u (nm)', y_label='v (nm)', 
+                          xcorr_label='xcorr_hist_2i1'):
     vis_gamma = 1
     auto_im = pyutil.vis.imfuse_2d(result['acorr_hist_1'].T, result['acorr_hist_2'].T, gamma=vis_gamma)
-    cross_im = pyutil.vis.imfuse_2d(result['acorr_hist_1'].T, result['xcorr_hist'].T, gamma=vis_gamma)
+    
+    cross_im = pyutil.vis.imfuse_2d(result['acorr_hist_1'].T, result[xcorr_label].T, gamma=vis_gamma)
 
     f, a = plt.subplots(1, 2, figsize=(10, 5))
     a[0].imshow(auto_im, extent=[result['x_range'][0], result['x_range'][-1], 
                                 result['y_range'][0], result['y_range'][-1]], origin='lower')
-    a[0].set_xlabel('u (nm)')
-    a[0].set_ylabel('v (nm)')
+    a[0].set_xlabel(x_label)
+    a[0].set_ylabel(y_label)
     a[0].grid()
     a[0].set_aspect('equal')
     a[1].imshow(cross_im, extent=[result['x_range'][0], result['x_range'][-1], 
                                 result['y_range'][0], result['y_range'][-1]], origin='lower')
-    a[1].set_xlabel('u (nm)')
-    a[1].set_ylabel('v (nm)')
+    a[1].set_xlabel(x_label)
+    a[1].set_ylabel(y_label)
     a[1].grid()
     a[1].set_aspect('equal')
     f.tight_layout()
     return f, a
 
 def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, tmp_cp_proj_uvw, 
-                                     arrow_len=5000): 
+                                     arrow_len=5000, x_label='u (nm)', y_label='v (nm)'): 
     oo_idx = int(np.nonzero(pt_oo_info['m_list'] == m_fold_syn)[0])
     opt_oo = pt_oo_info['oo'][:, oo_idx]
     # opt_oo_arg = np.angle(opt_oo)
@@ -344,11 +317,189 @@ def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, tmp_cp_proj_uvw,
     for tmp_uv, tmp_uv1 in zip(tmp_cp_proj_uvw[:, [0, 1]], opt_oo_ep): 
         plt.arrow(tmp_uv[0], tmp_uv[1], 
                   tmp_uv1[0]-tmp_uv[0], tmp_uv1[1]-tmp_uv[1], 
-                color='red', alpha=0.5, head_width=20, head_length=30)
+                color='red', alpha=0.5)
     f.colorbar(a.collections[0], ax=a, label='max oo m')
     a.set_aspect('equal')
     a.grid()
-    a.set_xlabel('u (nm)')
-    a.set_ylabel('v (nm)')
+    a.set_xlabel(x_label)
+    a.set_ylabel(y_label)
     f.tight_layout()
     return f, a
+
+
+#region Translation 
+def compute_reciprocal_vector_2d(data_pts, num_nb, max_dist, return_kdt_Q=False):
+    """ Compute the reciprocal lattice vectors given the point cloud data of a unit cell.
+    Input: 
+        data_pts: (N, d) array of point coordinates.
+        num_nb: number of nearest neighbors to consider for computing the lattice vectors.
+        max_dist: maximum distance to consider for neighbors when computing the lattice vectors.
+    
+    """
+    # Collect neighbor vectors from all points
+    pt_kdt = sps.cKDTree(data_pts)
+    nb_dist, nb_idx = pt_kdt.query(data_pts, k=num_nb+1)
+    # remove self
+    nb_dist = nb_dist[:, 1:]
+    nb_idx = nb_idx[:, 1:]
+    nb_vec = np.zeros((data_pts.shape[0], num_nb, data_pts.shape[1]))
+    for i in range(data_pts.shape[0]):
+        nb_vec[i] = data_pts[nb_idx[i]] - data_pts[i]
+    # only consider the first two components 
+    nb_x = nb_vec[:, :, 0].flatten()
+    nb_y = nb_vec[:, :, 1].flatten()
+    nb_valid_Q = (nb_dist < max_dist).flatten()
+    nb_x = nb_x[nb_valid_Q]
+    nb_y = nb_y[nb_valid_Q]
+
+    # Use KMeans to find the main directions of the neighbor vectors
+    kmeans = KMeans(n_clusters=num_nb)
+    kmeans.fit(np.column_stack([nb_x, nb_y]))
+    ctr_xy = kmeans.cluster_centers_
+    ctr_len = np.linalg.norm(ctr_xy, axis=1)
+    # vec_1_idx = np.nonzero(np.all(ctr_xy > 0, axis=1))[0][0]
+    vec_1_idx = np.argmin(ctr_len)
+    vec_1 = ctr_xy[vec_1_idx]
+    vec_2_idx = np.argmin(np.abs(ctr_xy @ vec_1[:, None]))
+    vec_2 = ctr_xy[vec_2_idx]
+    G_mat = np.linalg.inv(np.column_stack((vec_1, vec_2))) * 2 * np.pi
+    if return_kdt_Q: 
+        return G_mat, pt_kdt
+    else: 
+        return G_mat
+
+def compute_translation_correlation(data_pts, G_mat, num_nb, max_dist, bin_width, 
+                                        pt_kdt=None): 
+
+    bin_edges = np.arange(-bin_width/2, max_dist + 3 * bin_width/2, bin_width)
+    num_bin = bin_edges.shape[0] - 1
+    bin_val = bin_edges[:-1] + bin_width / 2
+    # Get neighbors
+    if pt_kdt is None:
+        pt_kdt = sps.cKDTree(data_pts)
+    nb_dist, nb_idx = pt_kdt.query(data_pts, k=num_nb+1, distance_upper_bound=max_dist)
+    nb_dist = nb_dist[:, 1:]
+    nb_idx = nb_idx[:, 1:]
+
+    trans_order = np.full((nb_dist.shape[0], num_bin), np.nan, dtype=np.complex128)
+    for r_max_idx in range(data_pts.shape[0]):
+        tmp_nb_dist = nb_dist[r_max_idx]
+        tmp_nb_idx = nb_idx[r_max_idx]
+        tmp_nb_valid_Q = (tmp_nb_dist < max_dist)
+        tmp_nb_dist = tmp_nb_dist[tmp_nb_valid_Q]
+        tmp_nb_idx = tmp_nb_idx[tmp_nb_valid_Q]
+        # site-centered
+        tmp_nb_vec = data_pts[tmp_nb_idx] - data_pts[r_max_idx]
+        tmp_nb_vec_12 = tmp_nb_vec[:, 0:2]
+        tmp_nb_vec_phi = G_mat @ tmp_nb_vec_12.T
+        tmp_nb_rho = np.exp(1j * tmp_nb_vec_phi)
+
+        tmp_nb_bin_idx = np.round(tmp_nb_dist / bin_width).astype(np.int32)
+        tmp_bin_idx = pyutil.util.bin_data_to_idx_list(tmp_nb_bin_idx, return_type='dict')
+        tmp_to = np.full(bin_edges.shape[0] - 1, np.nan, dtype=np.complex128)
+        for k, idx_list in tmp_bin_idx.items():
+            tmp_to[k] = np.mean(tmp_nb_rho[0][idx_list])
+        tmp_to[np.isnan(tmp_to)] = 0
+        trans_order[r_max_idx] = tmp_to
+
+    result = {
+        'bin_edges': bin_edges,
+        'bin_val': bin_val,
+        'pts_translation_order': trans_order, 
+        'avg_translation_order': np.nanmean(trans_order, axis=0)
+    }
+    result['avg_translation_order_abs'] = np.abs(result['avg_translation_order'])
+    result['avg_translation_order_r'] = np.real(result['avg_translation_order'])
+    r_max_idx = np.argmax(np.real(result['avg_translation_order_r']))
+    abs_max_idx = np.argmax(np.real(result['avg_translation_order_abs']))
+    result['peak_bin_val_r'] = bin_val[r_max_idx]
+    result['peak_bin_val_abs'] = bin_val[abs_max_idx]
+    result['bin_val_n_r'] = bin_val / result['peak_bin_val_r']
+    result['bin_val_n_abs'] = bin_val / result['peak_bin_val_abs']
+    return result
+
+def vis_translation_correlation(result, title=None,
+                                x_label='r/a', y_label='Translational correlation', 
+                                x_key='bin_val_n_abs'): 
+    x = result[x_key]
+    max_bin = np.ceil(np.max(x))
+    lattice_r = np.arange(max_bin) ** 2
+    lattice_r = np.unique(np.sqrt(lattice_r[:, None] + lattice_r[None, :]))
+    lattice_r = lattice_r[(lattice_r > 0) & (lattice_r < max_bin)]
+
+    f, a = plt.subplots(1, 1, figsize=(5, 4))
+    a.plot(x, result['avg_translation_order_r'], label='Re')
+    a.plot(x, result['avg_translation_order_abs'], label='Abs')
+    for i in lattice_r: 
+        a.axvline(i, color='gray', linestyle='--', alpha=0.5)
+    a.set_xlabel(x_label)
+    a.set_ylabel(y_label)
+    vis_min = np.round(np.nanmin(result['avg_translation_order_r']), 2) 
+    vis_min = np.minimum(-0.05, vis_min)
+    a.set_ylim([vis_min, 1.05])
+    a.legend()
+    a.grid()
+    a.set_title(title)
+    return f, a
+#endregion
+
+#region Radial 
+def compute_radial_distribution_function(pts, max_dist, max_knn, num_bins, remove_self_Q=True): 
+    pts = np.asarray(pts).astype(np.float32)
+
+    hist_bins = np.arange(0, max_dist+1e-9, max_dist/num_bins)
+    hist_bin_val = (hist_bins[:-1] + hist_bins[1:]) / 2
+    hist_bin_area = np.pi * (hist_bins[1:]**2 - hist_bins[:-1]**2)
+    pts_r_counts = np.full((pts.shape[0], num_bins), fill_value=np.nan)
+
+    pt_kdt = sps.cKDTree(pts)
+
+    for i, tmp_pt in enumerate(pts):
+        tmp_dist, tmp_idx = pt_kdt.query(tmp_pt, k=max_knn, distance_upper_bound=max_dist)
+        tmp_valid_Q = tmp_dist <= max_dist
+        if remove_self_Q:
+            assert tmp_dist[0] == 0, 'The closest point should be itself with distance 0.'
+            tmp_valid_Q[0] = False
+        if tmp_valid_Q[-1] == True: 
+            print(f'Warning: point {i} has more than {max_knn} neighbors within {max_dist} distance. Consider increasing max_knn or max_dist.')
+        tmp_dist = tmp_dist[tmp_valid_Q]
+        tmp_idx = tmp_idx[tmp_valid_Q]
+        tmp_counts = np.histogram(tmp_dist, bins=hist_bins)[0].astype(np.float32)
+        # set the trailing 0 to nan
+        for j in range(len(tmp_counts)-1, -1, -1):
+            if tmp_counts[j] > 0:
+                break
+            else:
+                tmp_counts[j] = np.nan
+        pts_r_counts[i] = tmp_counts
+    
+    avg_r_counts = np.nanmean(pts_r_counts, axis=0)
+    avg_r_den = avg_r_counts / hist_bin_area
+    bond_length = hist_bin_val[np.argmax(avg_r_den)]
+
+    result = {
+        'hist_bins': hist_bins,
+        'hist_bin_val': hist_bin_val,
+        'hist_bin_area': hist_bin_area,
+        'pts_r_counts': pts_r_counts,
+        'avg_r_counts': avg_r_counts, 
+        'avg_r_density': avg_r_den, 
+        'peak_dist': bond_length
+    }
+
+    return result
+
+def vis_radial_distribution_function(result, title=None, 
+                                x_label='r (nm)', y_label='g(r)'):
+    f, a = plt.subplots(1, 1, figsize=(5, 4))
+    a.plot(result['hist_bin_val'], result['avg_r_density'], label='g(r)')
+    a.axvline(result['peak_dist'], color='red', linestyle='--', label=f'Peak at {result["peak_dist"]:.2f} nm')
+    a.set_xlabel(x_label)
+    a.set_ylabel(y_label)
+    a.legend()
+    a.grid()
+    a.set_title(title)
+    f.tight_layout()
+    return f, a
+
+#endregion

@@ -737,12 +737,12 @@ def vis_2d_ellipse(mu, eig_vec, eig_s, n_std=1, f=None, ax=None,
     if ax is None:
         f, ax = plt.subplots(figsize=(5, 5))
 
-    ax.scatter(mu[0], mu[1], s=s, label=label, color=color, alpha=alpha)
+    sc = ax.scatter(mu[0], mu[1], s=s, label=label, color=color, alpha=alpha)
     if label_ctr_Q: 
-        ctr_label = f"({mu[0]:.1f}, {mu[1]:.1f}) ± {n_std} σ"
+        ctr_label = f"({mu[0]:.1f}, {mu[1]:.1f}) ± {n_std} σ\nσ = ({eig_s[0]:.1f}, {eig_s[1]:.1f})"
     else: 
         ctr_label = None
-    ax.plot(ellip_xy[0], ellip_xy[1], alpha=alpha, color=color, label=ctr_label)
+    ax.plot(ellip_xy[0], ellip_xy[1], alpha=alpha, color=sc.get_edgecolor(), label=ctr_label)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     if label_ctr_Q:

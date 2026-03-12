@@ -149,6 +149,8 @@ def load_data(fp, arg=None):
         return np.load(fp, allow_pickle=True)
     elif ext == '.parquet':
         return pd.read_parquet(fp)
+    elif ext in ['.csv']:
+        return pd.read_csv(fp)  
     else: 
         raise "Unrecognized file type"
     
@@ -508,7 +510,7 @@ def _read_h5_cell(group, reorder_dimensions):
 mpl.rcParams['pdf.fonttype'] = 42
 mpl.rcParams['ps.fonttype'] = 42
 
-def print_image(fig_hdl, fig_fp, verbose_Q=True):
+def print_image(fig_hdl, fig_fp, verbose_Q=True, close_fig_Q=False):
     folder_path = os.path.dirname(fig_fp)
     if folder_path and (not os.path.isdir(folder_path)): 
         os.makedirs(folder_path)
@@ -527,6 +529,8 @@ def print_image(fig_hdl, fig_fp, verbose_Q=True):
         fig_hdl.savefig(fig_fp)
     if verbose_Q:
         print('Finish saving figure as {:s}'.format(fig_fp))
+    if close_fig_Q: 
+        plt.close(fig_hdl)
 
 def print_image_in_several_formats(fig_hdl, fig_fp, format_list=['.pdf', '.pickle', '.png'], verbose_Q=True):
     fn, ext = os.path.splitext(fig_fp)
