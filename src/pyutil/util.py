@@ -354,7 +354,6 @@ class ScalarDict:
     def __call__(self, rid):
         return self.get_value(rid)
         
-
 def get_current_datestring(format="%Y%m%d_%H%M%S"):
     return datetime.datetime.now().strftime(format)
 
@@ -370,3 +369,33 @@ def construct_numpy_obj_array(arrays):
     obj_array = np.empty(num_elem, dtype=object)
     obj_array[:] = arrays
     return obj_array                
+
+class IntegerGrid(): 
+    def __init__(self, shape, origin=None): 
+        self.shape = shape
+        self.dim = len(shape)
+        if origin is not None: 
+            assert len(origin) == self.dim, "origin should have the same dimension as size"
+        else: 
+            origin = np.zeros(self.dim, dtype=int)
+        self.bbox_mm = origin
+        self.bbox_xx = self.bbox_mm + self.shape - 1
+    
+    def ind2sub(self, ind):
+        ind = np.asarray(ind)
+        sub = np.vstack(np.unravel_index(ind, self.shape))
+        for i in range(self.dim):
+            sub[i] += self.bbox_mm[i]
+        return sub
+    
+    def sub2ind(self, sub):
+        assert np.asarray(sub).shape[0] == self.dim, "sub should have the same dimension as size"
+        sub = np.asarray(sub) - self.bbox_mm[:, None]
+        ind = np.ravel_multi_index(sub, self.shape)
+        return ind
+
+    def grid2sub_v(self, grid): 
+        inds = np.flatnonzero(grid)
+        subs = self.ind2sub(inds)
+        v = grid.flat[inds]
+        return subs, v

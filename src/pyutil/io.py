@@ -7,7 +7,6 @@ import SimpleITK as sitk
 import numpy as np
 import pandas as pd
 
-
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -108,7 +107,10 @@ def write_data(fp, data, verboseQ=False):
     elif ext in ['.pickle', '.pkl']:
         write_pkl(fp, data)
     elif ext in ('.txt', '.csv'):
-        write_text(fp, data)
+        if isinstance(data, pd.DataFrame):
+            data.to_csv(fp, index=False)       
+        elif isinstance(data, str):
+            write_text(fp, data)
     elif ext == '.tif':
         tiff.imwrite(fp, data)
     elif ext in ['.nii', '.nii.gz']:
@@ -292,8 +294,10 @@ def write_parquet(fp, data):
 ####################
 #region Loading data 
 ####################
-def load_npz(fp):
-    with np.load(fp, allow_pickle=True) as data:
+def load_npz(fp, allow_pickle=True, key=None):
+    with np.load(fp, allow_pickle=allow_pickle) as data:
+        if key is not None:
+            return data[key]
         return dict(data)
 
 def load_pickle(fp):

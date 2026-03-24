@@ -518,10 +518,71 @@ def rebin_histogram(
         return new_pdf
     else:
         return new_mass
+
+def otsu_threshold_from_hist(counts: np.ndarray, edges: np.ndarray, 
+                             max_margin_Q=False) -> float:
+    """
+    Estimate Otsu threshold from a histogram (counts, edges) returned by np.histogram.
+
+    Assumptions:
+      - Uniform bin width.
+      - Threshold is returned at bin-width resolution (i.e., one of the bin edges).
+
+    Returns:
+      - threshold value (a bin edge) that maximizes between-class variance.
+    """
+    counts = np.asarray(counts).astype(np.float32)
+    edges = np.asarray(edges)
+
+    if counts.ndim != 1 or edges.ndim != 1 or edges.size != counts.size + 1:
+        raise ValueError("Expected 1D counts and edges with len(edges) == len(counts) + 1.")
+
+    w = counts
+    # Cumulative class weights: w0 for [0..i], w1 for [i+1..end]
+    w0 = np.cumsum(counts)
+    total = w0[-1]
+    w1 = total - w0
+    # Cumulative class means numerator: sum(w * x)
+    centers = (edges[:-1] + edges[1:]) * 0.5
+    m0_num = np.cumsum(w * centers)
+    m_total = m0_num[-1]
+    # Between-class variance (Otsu):
+    # sigma_b^2 = (m_total * w0 - m0_num * total)^2 / (w0 * w1)
+    denom = w0 * w1
+    sigma_b2 = np.zeros_like(denom, dtype=np.float64)
+    valid = denom > 0
+    diff = (m_total * w0[valid] - m0_num[valid] * total)
+    sigma_b2[valid] = (diff * diff) / denom[valid]
+
+    # Best split index i means threshold at edges[i+1]
+    if max_margin_Q:
+        max_sig = np.max(sigma_b2)
+        max_idxs = np.flatnonzero(np.isclose(sigma_b2, max_sig, atol=1e-8, rtol=0))
+        i = max_idxs[len(max_idxs) // 2]  # pick middle if multiple
+    else: 
+        i = int(np.argmax(sigma_b2))
+
+    return float(edges[i + 1])
+
+def percentile(x, q, **kwargs): 
+    """ Add support for complex number by computing percentile separately 
+    for real and imaginary part.
     
+    """
+    x = np.asarray(x)
+    if np.any(np.iscomplex(x)):
+        xr = np.real(x)
+        xi = np.imag(x)
+        prctile_r = np.nanpercentile(xr, q, **kwargs)
+        prctile_i = np.nanpercentile(xi, q, **kwargs)
+        return prctile_r + 1j * prctile_i
+    else:
+        return np.nanpercentile(x, q, **kwargs)
+    
+
 #region Point cloud
 def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_Q=True, 
-                                         compute_eig_Q=True):
+                                         compute_eig_Q=True, compute_med_Q=False):
     """
     Compute basic statistics for a d-dimensional point cloud.
 
@@ -534,7 +595,8 @@ def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_
             - mean: The mean of the point cloud (d-dimensional).
             - cov: The covariance matrix of the point cloud (d x d).
             - eig_s: The square root of eigenvalues of the covariance matrix (d-dimensional), sorted in descending order.
-            - eig_v: The eigenvectors of the covariance matrix (d x d). Each column is the right eigenvector
+            - eig_v: The eigenvectors of the covariance matrix (d x d). 
+                     Each column is the right eigenvector, Av = lambda * v.
     """
     compute_cov_Q = compute_cov_Q or compute_eig_Q
 
@@ -549,14 +611,18 @@ def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_
     num_pts, num_d = point_cloud.shape
     stats = {'n': num_pts,
              'mean': np.full((num_d,), np.nan),
-             'tot_weight': np.nansum(weights) if weights is not None else num_pts}
-    if compute_cov_Q: 
-        stats['cov'] = np.full((num_d, num_d), np.nan)
-    if compute_eig_Q: 
-        stats['eig_s'] = np.full((num_d,), np.nan)
-        stats['eig_v'] = np.full((num_d, num_d), np.nan)
+             'tot_weight': np.nansum(weights) if weights is not None else num_pts, 
+             'cov': np.full((num_d, num_d), np.nan), 
+             'eig_s': np.full((num_d,), np.nan),
+             'eig_v': np.full((num_d, num_d), np.nan)}
+    if compute_med_Q: 
+        stats['median'] = np.full((num_d,), np.nan)
+        
     if num_pts > 0: 
         stats['mean'] = np.average(point_cloud, axis=0, weights=weights)
+        if compute_med_Q:
+            stats['median'] = np.median(point_cloud, axis=0)
+
         if compute_cov_Q: 
             if num_pts > 1:
                 stats['cov'] = np.cov(point_cloud - stats['mean'], rowvar=False, fweights=weights, ddof=0)
@@ -571,12 +637,18 @@ def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_
                     eig_val = np.real(eig_val)
                 # sort eigenvalue in descending order
                 sorted_indices = np.argsort(eig_val)[::-1]
-                stats['eig_s'] = np.sqrt(eig_val[sorted_indices])
+                stats['eig_s'] = eig_val[sorted_indices]
                 stats['eig_v'] = eig_vec[:, sorted_indices]
+                with np.errstate(invalid='ignore'):
+                    stats['eig_s'] = np.sqrt(stats['eig_s'])
             else: 
                 stats['eig_s'] = np.zeros((num_d,))
                 stats['eig_v'] = np.eye(num_d)
-
+        if not compute_cov_Q: 
+            del stats['cov']
+        if not compute_eig_Q: 
+            del stats['eig_s']
+            del stats['eig_v']
     return stats
 
 def point_cloud_linear_outlier_rejection(point_pos, ipr=1.5): 
@@ -661,65 +733,147 @@ def compute_point_cloud_dist_from_stat(stat1, stat2, project_to_eig1=True):
 
     return dist_info
 
-import numpy as np
-
-def otsu_threshold_from_hist(counts: np.ndarray, edges: np.ndarray, 
-                             max_margin_Q=False) -> float:
+def remove_outliers_2d_percentile(points, ipr=1.5):
     """
-    Estimate Otsu threshold from a histogram (counts, edges) returned by np.histogram.
-
-    Assumptions:
-      - Uniform bin width.
-      - Threshold is returned at bin-width resolution (i.e., one of the bin edges).
+    Reject outliers in a 2D point cloud based on the inter-percentile range (IPR) method.
+    Compute the residual as the distance of each point from the median point, and remove points with
+    residuals outside the IPR-defined range.
+    Args:
+        points (np.ndarray): A (N, 2) array of points.
+        ipr (float): The multiplier for the inter-percentile range to define outliers.
 
     Returns:
-      - threshold value (a bin edge) that maximizes between-class variance.
+        np.ndarray: A boolean array indicating which points are inliers (True) and which are outliers (False).
     """
-    counts = np.asarray(counts).astype(np.float32)
-    edges = np.asarray(edges)
+    if points.shape[0] < 3: 
+        return points
+    inlier_Q = np.full((points.shape[0],), True)
+    for dim in range(points.shape[1]):
+        tmp_is_inlier_Q = is_inlier_by_percentile(points[:, dim], ipr=ipr)
+        inlier_Q = inlier_Q & tmp_is_inlier_Q
+    points = points[inlier_Q, :]
+    median_point = np.median(points, axis=0)
+    # alternatively, the covariance matrix can be estimated using 
+    # sklearn.covariance.MinCovDet. But it takes ~ 1.5 sec for 6800 pts. 
+    #
+    inlier_stat = compute_point_cloud_basic_statistics(points)
+    dist_2_med = (points - median_point) @ inlier_stat['eig_v'] @ np.diag(1 / inlier_stat['eig_s']) 
+    dist_2_med = np.linalg.norm(dist_2_med, axis=1)
+    inlier_Q = is_inlier_by_percentile(dist_2_med, ipr=ipr)
+    return points[inlier_Q]
 
-    if counts.ndim != 1 or edges.ndim != 1 or edges.size != counts.size + 1:
-        raise ValueError("Expected 1D counts and edges with len(edges) == len(counts) + 1.")
+# from scipy.stats import chi2
+# from sklearn.covariance import MinCovDet
 
-    w = counts
-    # Cumulative class weights: w0 for [0..i], w1 for [i+1..end]
-    w0 = np.cumsum(counts)
-    total = w0[-1]
-    w1 = total - w0
-    # Cumulative class means numerator: sum(w * x)
-    centers = (edges[:-1] + edges[1:]) * 0.5
-    m0_num = np.cumsum(w * centers)
-    m_total = m0_num[-1]
-    # Between-class variance (Otsu):
-    # sigma_b^2 = (m_total * w0 - m0_num * total)^2 / (w0 * w1)
-    denom = w0 * w1
-    sigma_b2 = np.zeros_like(denom, dtype=np.float64)
-    valid = denom > 0
-    diff = (m_total * w0[valid] - m0_num[valid] * total)
-    sigma_b2[valid] = (diff * diff) / denom[valid]
+# def reject_outliers_2d_mcd(
+#     points: np.ndarray,
+#     keep_fraction: float = 0.99,
+#     assume_centered: bool = False,
+#     support_fraction: float | None = None,
+#     return_diagnostics: bool = False,
+# ) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, dict]:
+#     """
+#     Robust 2D outlier rejection using robust Mahalanobis distance.
 
-    # Best split index i means threshold at edges[i+1]
-    if max_margin_Q:
-        max_sig = np.max(sigma_b2)
-        max_idxs = np.flatnonzero(np.isclose(sigma_b2, max_sig, atol=1e-8, rtol=0))
-        i = max_idxs[len(max_idxs) // 2]  # pick middle if multiple
-    else: 
-        i = int(np.argmax(sigma_b2))
+#     This uses Minimum Covariance Determinant (MCD) to estimate a robust center
+#     and covariance, then rejects points outside the chi-square quantile contour.
 
-    return float(edges[i + 1])
+#     Parameters
+#     ----------
+#     points
+#         Array of shape (n_samples, 2).
+#     keep_fraction
+#         Fraction of inlier mass to keep, interpreted as a 2D joint quantile.
+#         Example: 0.99 keeps the central 99% ellipse under the robust model.
+#     assume_centered
+#         Passed to MinCovDet. Set True only if the true center is known to be near zero.
+#     support_fraction
+#         Passed to MinCovDet. Smaller values can be more robust but may be less stable.
+#         None lets sklearn choose automatically.
+#     return_diagnostics
+#         If True, also return a dict with robust center, covariance, distances,
+#         threshold, and raw estimator.
 
-def percentile(x, q, **kwargs): 
-    """ Add support for complex number by computing percentile separately 
-    for real and imaginary part.
-    
-    """
-    x = np.asarray(x)
-    if np.any(np.iscomplex(x)):
-        xr = np.real(x)
-        xi = np.imag(x)
-        prctile_r = np.nanpercentile(xr, q, **kwargs)
-        prctile_i = np.nanpercentile(xi, q, **kwargs)
-        return prctile_r + 1j * prctile_i
-    else:
-        return np.nanpercentile(x, q, **kwargs)
+#     Returns
+#     -------
+#     inlier_mask
+#         Boolean array of shape (n_samples,), True for retained points.
+#     filtered_points
+#         Array of retained points with shape (n_inliers, 2).
+#     diagnostics
+#         Returned only if return_diagnostics=True.
+
+#     Raises
+#     ------
+#     ValueError
+#         If inputs are invalid or there are too few points.
+
+#     Notes
+#     -----
+#     The squared Mahalanobis distance is compared to the chi-square cutoff
+#     with 2 degrees of freedom:
+
+#         d^2 <= chi2.ppf(keep_fraction, df=2)
+
+#     This works well when the inlier cloud is approximately elliptical, even if
+#     strongly correlated. It is much better than per-axis percentile clipping
+#     for tilted point clouds.
+#     """
+#     points = np.asarray(points, dtype=float)
+
+#     if points.ndim != 2 or points.shape[1] != 2:
+#         raise ValueError(f"`points` must have shape (n_samples, 2), got {points.shape}.")
+#     if len(points) < 5:
+#         raise ValueError("Need at least 5 points for robust 2D covariance estimation.")
+#     if not (0.0 < keep_fraction < 1.0):
+#         raise ValueError("`keep_fraction` must be strictly between 0 and 1.")
+
+#     # Remove rows with non-finite values before fitting.
+#     finite_mask = np.isfinite(points).all(axis=1)
+#     if not np.all(finite_mask):
+#         clean_points = points[finite_mask]
+#     else:
+#         clean_points = points
+
+#     if len(clean_points) < 5:
+#         raise ValueError("Too few finite points after removing NaN/Inf rows.")
+
+#     # Robust location and covariance estimate.
+#     mcd = MinCovDet(
+#         assume_centered=assume_centered,
+#         support_fraction=support_fraction,
+#         random_state=0,
+#     )
+#     mcd.fit(clean_points)
+
+#     # Robust squared Mahalanobis distances on finite points.
+#     d2_clean = mcd.mahalanobis(clean_points)
+
+#     # 2D joint quantile cutoff.
+#     threshold = chi2.ppf(keep_fraction, df=2)
+
+#     inlier_mask_clean = d2_clean <= threshold
+
+#     # Rebuild mask against original input shape.
+#     inlier_mask = np.zeros(len(points), dtype=bool)
+#     inlier_mask[finite_mask] = inlier_mask_clean
+
+#     filtered_points = points[inlier_mask]
+
+#     if not return_diagnostics:
+#         return inlier_mask, filtered_points
+
+#     diagnostics = {
+#         "robust_center": mcd.location_.copy(),
+#         "robust_covariance": mcd.covariance_.copy(),
+#         "squared_mahalanobis": np.where(finite_mask, np.nan, np.nan),  # placeholder
+#         "threshold": threshold,
+#         "estimator": mcd,
+#     }
+#     diagnostics["squared_mahalanobis"] = np.full(len(points), np.nan, dtype=float)
+#     diagnostics["squared_mahalanobis"][finite_mask] = d2_clean
+
+#     return inlier_mask, filtered_points, diagnostics
+
+
 #endregion
