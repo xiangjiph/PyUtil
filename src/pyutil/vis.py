@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.colors import LogNorm, Normalize
 import matplotlib.colors as mcolors
+from adjustText import adjust_text
 
 import os
 import pickle
@@ -799,3 +800,31 @@ def vis_2d_pt_hist2(pts, bins=None, f=None, a=None, vis_ellipse_Q=False,
     if title is not None:
         a.set_title(title)
     return f, a
+
+def vis_2d_scatter_with_annotation(x, y, annotations=None, x_err=None, y_err=None, 
+                                   f=None, a=None, x_scale='linear', y_scale='linear', 
+                                   c_val=None, cmap='jet', c_bar_label=None, v_min=None, v_max=None, 
+                                   norm='linear'):
+    if f is None or a is None:
+        f, a = plt.subplots(figsize=(6, 5))
+
+    if x_err is None and y_err is None:
+        sc = a.scatter(x, y, c=c_val, cmap=cmap, vmin=v_min, vmax=v_max, 
+                       norm=norm, alpha=1)
+    else: 
+        sc = a.errorbar(x, y, xerr=x_err, yerr=y_err, fmt='o', ecolor='gray', capsize=3)
+    
+    a.set_xscale(x_scale)
+    a.set_yscale(y_scale)
+    if c_val is not None:
+        cb = f.colorbar(sc, ax=a)
+        cb.set_label(c_bar_label)
+    
+    if annotations is not None:
+        assert len(annotations) == len(x) == len(y), ValueError("Length of annotations must match length of x and y")
+        text = []
+        for i, txt in enumerate(annotations):
+            text.append(a.text(x[i], y[i], txt, fontsize=9))
+        
+        _, _ = adjust_text(text, arrowprops=dict(arrowstyle='->', color='red'))
+    return f, a 

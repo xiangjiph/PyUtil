@@ -328,6 +328,11 @@ def swap_two_layer_nested_dict_order(dod):
             swapped_dod[k2][k1] = v
     return swapped_dod
 
+def get_v_in_nested_dict(d, key_list):
+    for k in key_list:
+        d = d[k]
+    return d
+
 class ScalarDict: 
     def __init__(self, key, value=None): 
         idx = np.argsort(key, kind='stable')

@@ -67,7 +67,7 @@ def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1):
     result = {
         'acorr_nb_vec_1': acorr_nb_vec_1,
         'xcorr_vec_2i1': xcorr_vec_2i1,
-        'xcorr_vec_1i2': xcorr_vec_2i1,
+        'xcorr_vec_1i2': xcorr_vec_1i2,
         'acorr_nb_vec_2': acorr_nb_vec_2,
         'acorr_hist_1': acorr_hist_1,   
         'xcorr_hist_2i1': xcorr_hist_2i1,
@@ -503,3 +503,36 @@ def vis_radial_distribution_function(result, title=None,
     return f, a
 
 #endregion
+
+#region Transformation
+def hexagonal_pq_to_xy(p, q, e_p=None, e_q=None, x_0=0, y_0=0):
+    """
+    Convert lattice (p, q) coordinates to Cartesian (x, y).
+
+    By default:
+    e_p = (np.sqrt(3)/2, 1/2)
+    e_q = (-np.sqrt(3)/2, 1/2)
+    which are unit vectors 120 deg apart.
+    """
+    p = np.asarray(p).ravel()
+    q = np.asarray(q).ravel()
+    if p.ndim != 1 or q.ndim != 1 or p.size != q.size:
+        raise ValueError("p and q must be 1D arrays of the same length.")
+
+    if e_p is None:
+        # e_p = np.array([1.0, 0.0], dtype=float)
+        e_p = np.asarray([np.sqrt(3)/2, 1/2])
+    else:
+        e_p = np.asarray(e_p, dtype=float).ravel()
+        assert e_p.size == 2, "e_p must be length-2."
+
+    if e_q is None:
+        e_q = np.asarray([-np.sqrt(3)/2, 1/2])
+        # e_q = np.array([-0.5, np.sqrt(3.0) / 2.0], dtype=float)
+    else:
+        e_q = np.asarray(e_q, dtype=float).ravel()
+        assert e_q.size == 2, "e_q must be length-2."
+
+    x = p * e_p[0] + q * e_q[0] + x_0
+    y = p * e_p[1] + q * e_q[1] + y_0
+    return x, y

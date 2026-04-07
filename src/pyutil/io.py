@@ -276,8 +276,10 @@ def write_nii(fp, data):
     sitk.WriteImage(sitk_data, fp)
 
 def write_csv(fp, data):
-    # if isinstance(data, pd.
-    pass
+    if isinstance(data, pd.DataFrame):
+        data.to_csv(fp, index=False)
+    else: 
+        raise NotImplementedError("Currently only support writing pandas DataFrame to csv file")
 
 def write_parquet(fp, data):
     import pandas as pd

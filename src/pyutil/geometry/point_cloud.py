@@ -1358,15 +1358,21 @@ def grid_centroids(points: np.ndarray,
         return model.centroids, model.cell_subscripts, model.counts
     return model.centroids, model.cell_subscripts
 
-def downsample_points_by_averaging(pts, grid_size):
+def downsample_points_by_averaging(pts, grid_size, features=None):
     if pts is None or len(pts) == 0:
         return pts
     else: 
         pts = np.asarray(pts)
         if pts.ndim != 2:
             raise ValueError("pts must have shape (N, D)")
-        model = GridDownsamplerND(points=pts, cell_size=grid_size)
-        return model.downsample()
+        model = GridDownsamplerND(points=pts, cell_size=grid_size, 
+                                  features=features)
+        if features is None: 
+            return model.downsample()
+        else: 
+            pts_ds = model.downsample()
+            features_ds = model.get_cell_feature_stats(func=np.nanmean)
+            return pts_ds, features_ds
 
 def select_points_near_pc1(pts, ipr=1.5, max_dist_th=None): 
     pts = np.asarray(pts)
