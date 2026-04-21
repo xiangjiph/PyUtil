@@ -581,6 +581,28 @@ def percentile(x, q, **kwargs):
     
 
 #region Point cloud
+def get_scatter_bin_info(data, dpq=0.5, ptrl=[1, 99], 
+                         equal_length_Q=True, symmetric_Q=True, min_pq_lim=0):
+    assert data.shape[1] == 2, "Data must have 2 columns for p and q."
+    valid_Q = np.isfinite(data).all(axis=1)
+    data = data[valid_Q]
+    # Define histogram range
+    pq_min = np.floor(np.percentile(data, ptrl[0], axis=0))
+    pq_max = np.ceil(np.percentile(data, ptrl[1], axis=0))
+    if equal_length_Q:
+        pq_min = np.ones(2) * np.min(pq_min)
+        pq_max = np.ones(2) * np.max(pq_max)
+    if symmetric_Q:
+        pq_max = np.maximum(min_pq_lim, np.maximum(np.abs(pq_min), np.abs(pq_max)))
+        pq_min = -pq_max
+
+    p_edges = np.arange(pq_min[0], pq_max[0]+dpq, dpq)
+    q_edges = np.arange(pq_min[1], pq_max[1]+dpq, dpq)
+    result = {'pq_min': pq_min, 'pq_max': pq_max, 
+                'p_edges': p_edges, 'q_edges': q_edges, 
+                'dpq': dpq}
+    return result
+
 def compute_point_cloud_basic_statistics(point_cloud, weights=None, compute_cov_Q=True, 
                                          compute_eig_Q=True, compute_med_Q=False):
     """

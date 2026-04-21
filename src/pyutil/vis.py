@@ -828,3 +828,4 @@ def vis_2d_scatter_with_annotation(x, y, annotations=None, x_err=None, y_err=Non
         
         _, _ = adjust_text(text, arrowprops=dict(arrowstyle='->', color='red'))
     return f, a 
+

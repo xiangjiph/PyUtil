@@ -144,7 +144,7 @@ def load_data(fp, arg=None):
         if fp.endswith('.nii.gz'):
             return load_nii(fp)
         else:
-            raise "Unrecognized file type"
+            raise ValueError(f"Unrecognized file type: {ext}")
     elif ext in ['.npz']:
         return load_npz(fp)
     elif ext in ['.npy']:
@@ -153,8 +153,10 @@ def load_data(fp, arg=None):
         return pd.read_parquet(fp)
     elif ext in ['.csv']:
         return pd.read_csv(fp)  
+    elif ext in ['.feather']:
+        return pd.read_feather(fp)
     else: 
-        raise "Unrecognized file type"
+        raise ValueError(f"Unrecognized file type: {ext}")
     
 #region Saving data
 # def save_dict_as_h5(fp, data_dict):
@@ -267,7 +269,7 @@ def write_text(fp, txt):
 def write_json(fp, data):
     assert isinstance(data, dict), 'Only support writing diction into a json file'
     with open(fp, 'w') as file:
-        json.dump(data, file)
+        json.dump(data, file, indent=4)
 
 def write_nii(fp, data):
     sitk_data = sitk.GetImageFromArray(data)
