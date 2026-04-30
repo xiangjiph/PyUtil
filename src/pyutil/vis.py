@@ -11,13 +11,9 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from matplotlib.colors import LogNorm, Normalize
 import matplotlib.colors as mcolors
-from adjustText import adjust_text
 
 import os
 import pickle
-import plotly.graph_objects as go
-import plotly.express as px
-
 from . import stat as pyutil_stat
 
 mpl.rcParams['pdf.fonttype'] = 42
@@ -235,6 +231,7 @@ def implay(data, xlabel=None, ylabel=None, mag=1.5, fix_scale_Q=False, show_scal
     # temp = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
     # fig.write_html(temp.name)
     # webbrowser.open('file://' + os.path.realpath(temp.name))
+    import plotly.graph_objects as go
     data_shape = data.shape
     frames = [data[i] for i in range(data_shape[0])]
     if fix_scale_Q: 
@@ -297,6 +294,7 @@ def implay(data, xlabel=None, ylabel=None, mag=1.5, fix_scale_Q=False, show_scal
 
 def scatter3(x=None, y=None, z=None, figsize=(600, 600), reverse_z_dir_Q=False, \
              marker_size=1, aspectmode='cube', sub=None, title=None):
+    import plotly.express as px    
     if reverse_z_dir_Q:
         z_dir = "reversed"
     else:
@@ -320,6 +318,7 @@ def scatter3(x=None, y=None, z=None, figsize=(600, 600), reverse_z_dir_Q=False, 
     
 
 def imshow_w_dots(data, pos, mag=1, cmap='Gray'):
+    import plotly.graph_objects as go
     assert isinstance(pos, (tuple, list)), "pos should be a tuple of (x : np.array, y : np.array)"
     fig = go.Figure(go.Heatmap(
         z=data,
@@ -805,6 +804,7 @@ def vis_2d_scatter_with_annotation(x, y, annotations=None, x_err=None, y_err=Non
                                    f=None, a=None, x_scale='linear', y_scale='linear', 
                                    c_val=None, cmap='jet', c_bar_label=None, v_min=None, v_max=None, 
                                    norm='linear'):
+    from adjustText import adjust_text
     if f is None or a is None:
         f, a = plt.subplots(figsize=(6, 5))
 

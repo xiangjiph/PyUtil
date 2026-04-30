@@ -3,7 +3,6 @@ from scipy.io import savemat, loadmat
 import os, sys, platform
 import h5py, json, pickle
 import tifffile as tiff
-import SimpleITK as sitk
 import numpy as np
 import pandas as pd
 
@@ -272,6 +271,7 @@ def write_json(fp, data):
         json.dump(data, file, indent=4)
 
 def write_nii(fp, data):
+    import SimpleITK as sitk
     sitk_data = sitk.GetImageFromArray(data)
     sitk_data.SetOrigin((0.0, 0.0, 0.0))
     sitk_data.SetSpacing((1.0, 1.0, 1.0))
@@ -322,6 +322,7 @@ def load_tiff(fp, sec_range=None):
             return np.stack(tmp)
         
 def load_nii(fp, cvrt2nyQ=True):
+    import SimpleITK as sitk
     data = sitk.ReadImage(fp)
     if cvrt2nyQ:
         data = sitk.GetArrayFromImage(data)

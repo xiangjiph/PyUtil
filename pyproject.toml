@@ -24,7 +24,22 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = []
+dependencies = [
+  "numpy", 
+  "scipy", 
+  "pandas",
+  "matploblit", 
+  "networkx",
+  "adjust_text", 
+]
+
+[project-optional-dependencies]
+all = [
+  "opencv-python",
+  "dask",
+  "plotly", 
+  "SimpleITK",
+]
 
 [project.urls]
 Documentation = "https://github.com/U.N. Owen/pyutil#readme"

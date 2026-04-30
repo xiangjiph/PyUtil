@@ -1,19 +1,9 @@
 import numpy as np
 import scipy as sp
-import SimpleITK as sitk
 import skimage.registration
 
-
-
-
-class Registration:
-
-    def __init__(self):
-        pass
-
-
-    
 def TranslationRegITK(fixed_image, moving_image):
+    import SimpleITK as sitk
     # Convert to ITK object
     if isinstance(fixed_image, np.ndarray):
         fixed_image = sitk.GetImageFromArray(np.float32(fixed_image))

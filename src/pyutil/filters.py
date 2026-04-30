@@ -1,10 +1,9 @@
 import scipy.ndimage as ndi
-import dask.array as da 
 import numpy as np
 import pandas as pd
-# import cv2
 
 def medfilt3(block, size=3, chunks=None):
+    import dask.array as da 
     if isinstance(size, int):
         overlap = size // 2
     elif isinstance(size, tuple):
@@ -32,15 +31,16 @@ def dog(data, sig1, sig2):
 
     return (data_1 - data_2).astype(data.dtype)
 
-# def imgaussfilt2(data, wd_sz):
-#     data_dim = data.ndim
-#     if data_dim == 2:
-#         data = data[None, :, :]
-#     for i in range(data.shape[0]):
-#         data[i, :, :] = cv2.GaussianBlur(data[i, :, :], wd_sz, 0)
-#     if data_dim == 2:
-#         data = np.squeeze(data)
-#     return data
+def imgaussfilt2(data, wd_sz):
+    # import cv2
+    data_dim = data.ndim
+    if data_dim == 2:
+        data = data[None, :, :]
+    for i in range(data.shape[0]):
+        data[i, :, :] = cv2.GaussianBlur(data[i, :, :], wd_sz, 0)
+    if data_dim == 2:
+        data = np.squeeze(data)
+    return data
 
 def central_difference_1d(x): 
     x = np.asarray(x)

@@ -328,15 +328,7 @@ def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, tmp_cp_proj_uvw,
 
 
 #region Translation 
-def compute_reciprocal_vector_2d(data_pts, num_nb, max_dist, return_kdt_Q=False):
-    """ Compute the reciprocal lattice vectors given the point cloud data of a unit cell.
-    Input: 
-        data_pts: (N, d) array of point coordinates.
-        num_nb: number of nearest neighbors to consider for computing the lattice vectors.
-        max_dist: maximum distance to consider for neighbors when computing the lattice vectors.
-    
-    """
-    # Collect neighbor vectors from all points
+def _compute_knn_disp_vec(data_pts, num_nb): 
     pt_kdt = sps.cKDTree(data_pts)
     nb_dist, nb_idx = pt_kdt.query(data_pts, k=num_nb+1)
     # remove self
@@ -345,7 +337,12 @@ def compute_reciprocal_vector_2d(data_pts, num_nb, max_dist, return_kdt_Q=False)
     nb_vec = np.zeros((data_pts.shape[0], num_nb, data_pts.shape[1]))
     for i in range(data_pts.shape[0]):
         nb_vec[i] = data_pts[nb_idx[i]] - data_pts[i]
+    
+    return nb_vec, nb_dist, pt_kdt   
+
+def compute_lattice_unit_vector_2d(data_pts, num_nb, max_dist, return_kdt_Q=False): 
     # only consider the first two components 
+    nb_vec, nb_dist, pt_kdt = _compute_knn_disp_vec(data_pts, num_nb)
     nb_x = nb_vec[:, :, 0].flatten()
     nb_y = nb_vec[:, :, 1].flatten()
     nb_valid_Q = (nb_dist < max_dist).flatten()
@@ -362,7 +359,22 @@ def compute_reciprocal_vector_2d(data_pts, num_nb, max_dist, return_kdt_Q=False)
     vec_1 = ctr_xy[vec_1_idx]
     vec_2_idx = np.argmin(np.abs(ctr_xy @ vec_1[:, None]))
     vec_2 = ctr_xy[vec_2_idx]
-    G_mat = np.linalg.inv(np.column_stack((vec_1, vec_2))) * 2 * np.pi
+    vecs = np.column_stack((vec_1, vec_2))
+    if return_kdt_Q: 
+        return vecs, pt_kdt
+    else: 
+        return vecs
+
+def compute_reciprocal_vector_2d(data_pts, num_nb, max_dist, return_kdt_Q=False):
+    """ Compute the reciprocal lattice vectors given the point cloud data of a unit cell.
+    Input: 
+        data_pts: (N, d) array of point coordinates.
+        num_nb: number of nearest neighbors to consider for computing the lattice vectors.
+        max_dist: maximum distance to consider for neighbors when computing the lattice vectors.
+    
+    """
+    vecs, pt_kdt = compute_lattice_unit_vector_2d(data_pts, num_nb, max_dist, return_kdt_Q=True)
+    G_mat = np.linalg.inv(vecs) * 2 * np.pi
     if return_kdt_Q: 
         return G_mat, pt_kdt
     else: 
