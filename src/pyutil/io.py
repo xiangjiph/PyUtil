@@ -588,3 +588,186 @@ def get_most_recent_file(fp_pattern):
 #################
 #endregion
 #################
+
+#region matplotlib utilities
+def extract_matplotlib_figure(fig):
+    extracted = {
+        "figsize": fig.get_size_inches().tolist(),
+        "dpi": fig.dpi,
+        "axes": [],
+    }
+
+    for ax in fig.axes:
+        ax_data = {
+            "title": ax.get_title(),
+            "xlabel": ax.get_xlabel(),
+            "ylabel": ax.get_ylabel(),
+            "xlim": ax.get_xlim(),
+            "ylim": ax.get_ylim(),
+            "xscale": ax.get_xscale(),
+            "yscale": ax.get_yscale(),
+            "lines": [],
+            "collections": [],
+            "patches": [],
+            "images": [],
+            "legend": ax.get_legend() is not None,
+        }
+
+        # Lines
+        for line in ax.get_lines():
+            ax_data["lines"].append({
+                "x": np.asarray(line.get_xdata()).tolist(),
+                "y": np.asarray(line.get_ydata()).tolist(),
+                "label": line.get_label(),
+                "color": line.get_color(),
+                "linestyle": line.get_linestyle(),
+                "linewidth": line.get_linewidth(),
+                "marker": line.get_marker(),
+                "markersize": line.get_markersize(),
+                "alpha": line.get_alpha(),
+            })
+
+        # Scatter-like collections
+        for collection in ax.collections:
+            if hasattr(collection, "get_offsets"):
+                offsets = collection.get_offsets()
+                if len(offsets):
+                    sizes = collection.get_sizes()
+                    facecolors = collection.get_facecolors()
+                    edgecolors = collection.get_edgecolors()
+
+                    ax_data["collections"].append({
+                        "type": "scatter",
+                        "x": offsets[:, 0].tolist(),
+                        "y": offsets[:, 1].tolist(),
+                        "sizes": sizes.tolist() if len(sizes) else None,
+                        "facecolors": facecolors.tolist() if len(facecolors) else None,
+                        "edgecolors": edgecolors.tolist() if len(edgecolors) else None,
+                        "alpha": collection.get_alpha(),
+                        "label": collection.get_label(),
+                    })
+
+        # Rectangles / bars
+        for patch in ax.patches:
+            # This mostly handles bar charts and simple rectangles
+            if patch.__class__.__name__ == "Rectangle":
+                ax_data["patches"].append({
+                    "type": "rectangle",
+                    "x": patch.get_x(),
+                    "y": patch.get_y(),
+                    "width": patch.get_width(),
+                    "height": patch.get_height(),
+                    "facecolor": patch.get_facecolor(),
+                    "edgecolor": patch.get_edgecolor(),
+                    "alpha": patch.get_alpha(),
+                    "label": patch.get_label(),
+                })
+
+        # Images from imshow
+        for image in ax.images:
+            ax_data["images"].append({
+                "array": np.asarray(image.get_array()).tolist(),
+                "extent": image.get_extent(),
+                "cmap": image.get_cmap().name,
+                "alpha": image.get_alpha(),
+                "origin": image.origin,
+            })
+
+        extracted["axes"].append(ax_data)
+
+    return extracted
+
+
+def reconstruct_matplotlib_figure(extracted):
+    n_axes = len(extracted["axes"])
+
+    fig, axes = plt.subplots(
+        n_axes,
+        1,
+        figsize=extracted.get("figsize", None),
+        dpi=extracted.get("dpi", None),
+        squeeze=False,
+    )
+
+    axes = axes.ravel()
+
+    for ax, ax_data in zip(axes, extracted["axes"]):
+        # Lines
+        for line in ax_data["lines"]:
+            label = line["label"]
+            if label and label.startswith("_"):
+                label = None
+
+            ax.plot(
+                line["x"],
+                line["y"],
+                label=label,
+                color=line["color"],
+                linestyle=line["linestyle"],
+                linewidth=line["linewidth"],
+                marker=line["marker"],
+                markersize=line["markersize"],
+                alpha=line["alpha"],
+            )
+
+        # Scatter
+        for coll in ax_data["collections"]:
+            label = coll["label"]
+            if label and label.startswith("_"):
+                label = None
+
+            kwargs = {
+                "s": coll["sizes"],
+                "alpha": coll["alpha"],
+                "label": label,
+            }
+
+            if coll["facecolors"] is not None and len(coll["facecolors"]):
+                kwargs["c"] = coll["facecolors"]
+
+            if coll["edgecolors"] is not None and len(coll["edgecolors"]):
+                kwargs["edgecolors"] = coll["edgecolors"]
+
+            ax.scatter(coll["x"], coll["y"], **kwargs)
+
+        # Rectangles / bars
+        for patch in ax_data["patches"]:
+            label = patch["label"]
+            if label and label.startswith("_"):
+                label = None
+
+            ax.add_patch(
+                plt.Rectangle(
+                    (patch["x"], patch["y"]),
+                    patch["width"],
+                    patch["height"],
+                    facecolor=patch["facecolor"],
+                    edgecolor=patch["edgecolor"],
+                    alpha=patch["alpha"],
+                    label=label,
+                )
+            )
+
+        # Images
+        for image in ax_data["images"]:
+            ax.imshow(
+                image["array"],
+                extent=image["extent"],
+                cmap=image["cmap"],
+                alpha=image["alpha"],
+                origin=image["origin"],
+            )
+
+        ax.set_title(ax_data["title"])
+        ax.set_xlabel(ax_data["xlabel"])
+        ax.set_ylabel(ax_data["ylabel"])
+        ax.set_xlim(ax_data["xlim"])
+        ax.set_ylim(ax_data["ylim"])
+        ax.set_xscale(ax_data["xscale"])
+        ax.set_yscale(ax_data["yscale"])
+
+        if ax_data["legend"]:
+            ax.legend()
+
+    fig.tight_layout()
+    return fig

@@ -28,9 +28,12 @@ dependencies = [
   "numpy", 
   "scipy", 
   "pandas",
-  "matploblit", 
+  "matplotlib", 
   "networkx",
-  "adjust_text", 
+  "adjustText", 
+  "h5py", 
+  "tifffile",
+  "scikit-image", 
 ]
 
 [project-optional-dependencies]
