@@ -12,6 +12,9 @@ import matplotlib.gridspec as gridspec
 from matplotlib.colors import LogNorm, Normalize
 import matplotlib.colors as mcolors
 
+from pathlib import Path
+from PIL import Image
+
 import os
 import pickle
 from . import stat as pyutil_stat
@@ -829,3 +832,47 @@ def vis_2d_scatter_with_annotation(x, y, annotations=None, x_err=None, y_err=Non
         _, _ = adjust_text(text, arrowprops=dict(arrowstyle='->', color='red'))
     return f, a 
 
+#region video / gif
+def png_folder_to_gif(
+    input_folder,
+    resolution=None,              # (w, h) or None
+    duration=200,                 # milliseconds per frame for Pillow
+    save_path=None,
+    sort_by="name",               # "name" or "ctime"
+    reverse=False,
+    pattern="*.png",
+    loop=0
+):
+    input_folder = Path(input_folder)
+    imgs = list(input_folder.glob(pattern))
+    if not imgs:
+        raise ValueError("No PNG files found.")
+
+    if sort_by == "name":
+        imgs.sort(key=lambda p: p.name, reverse=reverse)
+    elif sort_by == "ctime":
+        imgs.sort(key=lambda p: p.stat().st_ctime, reverse=reverse)
+    else:
+        raise ValueError("sort_by must be 'name' or 'ctime'.")
+
+    frames = []
+    for p in imgs:
+        im = Image.open(p).convert("RGBA")
+        if resolution is not None:
+            im = im.resize(resolution, Image.Resampling.LANCZOS)
+        frames.append(im)
+
+    if save_path is None:
+        save_path = input_folder / f"{input_folder.name}.gif"
+    else:
+        save_path = Path(save_path).with_suffix(".gif")
+
+    frames[0].save(
+        save_path,
+        save_all=True,
+        append_images=frames[1:],
+        duration=duration,
+        loop=loop,
+        optimize=False
+    )
+    return save_path
