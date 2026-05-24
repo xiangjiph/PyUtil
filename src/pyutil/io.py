@@ -3,6 +3,7 @@ from scipy.io import savemat, loadmat
 import os, sys, platform
 import h5py, json, pickle
 import tifffile as tiff
+import nibabel as nib
 import numpy as np
 import pandas as pd
 
@@ -88,14 +89,21 @@ class DataManager:
         return load_data(fp)
         
 def _splitext(fp):
+    fp = os.fspath(fp)
     if fp.lower().endswith('.nii.gz'):
         return fp[:-7], '.nii.gz'
     return os.path.splitext(fp)
 
+
+def save_data(fp, data, verboseQ=False):
+    return write_data(fp, data, verboseQ)
+
 def write_data(fp, data, verboseQ=False):
+    fp = os.fspath(fp)
     folder, fn = os.path.split(fp)
     fn, ext = _splitext(fn)
-    os.makedirs(folder, exist_ok=True)
+    if folder:
+        os.makedirs(folder, exist_ok=True)
     if ext == '.mat':
         if isinstance(data, dict):
             write_dict_as_mat_file(fp, data)
@@ -126,6 +134,7 @@ def write_data(fp, data, verboseQ=False):
         print(f"Finish writing file {fp}")
 
 def load_data(fp, arg=None):
+    fp = os.fspath(fp)
     fn, ext = os.path.splitext(fp)
     if ext in ['.pickle', '.pkl']:
         return load_pickle(fp)
@@ -266,16 +275,30 @@ def write_text(fp, txt):
         f.write(txt)
 
 def write_json(fp, data):
-    assert isinstance(data, dict), 'Only support writing diction into a json file'
+    parent_dir, _ = os.path.split(os.fspath(fp))
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
     with open(fp, 'w') as file:
         json.dump(data, file, indent=4)
 
 def write_nii(fp, data):
-    import SimpleITK as sitk
-    sitk_data = sitk.GetImageFromArray(data)
-    sitk_data.SetOrigin((0.0, 0.0, 0.0))
-    sitk_data.SetSpacing((1.0, 1.0, 1.0))
-    sitk.WriteImage(sitk_data, fp)
+    parent_dir, _ = os.path.split(os.fspath(fp))
+    if parent_dir:
+        os.makedirs(parent_dir, exist_ok=True)
+    if isinstance(data, nib.Nifti1Image):
+        nib.save(data, fp)
+        return
+    if isinstance(data, dict):
+        image_data = np.asarray(data['data'])
+        affine = np.asarray(data.get('affine', np.eye(4)), dtype=np.float64)
+    else:
+        image_data = np.asarray(data)
+        affine = np.eye(4, dtype=np.float64)
+    image = nib.Nifti1Image(image_data, affine)
+    image.set_qform(affine, code=1)
+    image.set_sform(affine, code=1)
+    image.header.set_xyzt_units(xyz='mm')
+    nib.save(image, fp)
 
 def write_csv(fp, data):
     if isinstance(data, pd.DataFrame):
@@ -322,10 +345,9 @@ def load_tiff(fp, sec_range=None):
             return np.stack(tmp)
         
 def load_nii(fp, cvrt2nyQ=True):
-    import SimpleITK as sitk
-    data = sitk.ReadImage(fp)
+    data = nib.load(fp)
     if cvrt2nyQ:
-        data = sitk.GetArrayFromImage(data)
+        data = np.asarray(data.dataobj)
     return data
 
 def load_h5(fp):

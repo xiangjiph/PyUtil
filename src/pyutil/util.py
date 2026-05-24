@@ -218,7 +218,7 @@ def rows_in(A, B):
     return np.isin(Av, Bv)   # boolean mask of length N
 
 def minimize_int_dtype(arr: np.ndarray, *, allow_bool: bool = True, 
-                       copy: bool = False) -> np.ndarray:
+                       copy: bool = False, signed: bool = False) -> np.ndarray:
     """
     Return `arr` cast to the smallest exact NumPy integer dtype that can
     represent all its values. If no smaller exact dtype exists, return `arr`
@@ -294,7 +294,7 @@ def minimize_int_dtype(arr: np.ndarray, *, allow_bool: bool = True,
         return info.min <= mn and mx <= info.max
 
     # Try unsigned if nonnegative, else signed
-    if mn >= 0:
+    if mn >= 0 and (not signed):
         for dt in unsigned_chain:
             if fits(dt):
                 # If already this dtype, return original (unless copy=True and cast changes)
@@ -333,6 +333,18 @@ def get_v_in_nested_dict(d, key_list):
         d = d[k]
     return d
 
+def reorder_pd_columns(df, leading_cols=None, trailing_cols=None):
+    cols = df.columns.tolist()
+    if leading_cols is not None: 
+        for c in reversed(leading_cols):
+            cols.remove(c)
+            cols.insert(0, c)
+    if trailing_cols is not None: 
+        for c in trailing_cols:
+            cols.remove(c)
+            cols.append(c)
+    return df[cols]
+
 class ScalarDict: 
     def __init__(self, key, value=None): 
         idx = np.argsort(key, kind='stable')
@@ -340,13 +352,16 @@ class ScalarDict:
         if value is None: 
             self.value = np.arange(key.size)
         else: 
+            assert np.all(value >= 0), "value should be non-negative integers"
             assert key.shape == value.shape, "ind and label should have the same shape"
             self.value = value[idx]
         
     def get_value(self, keys, not_found_val=-1):
         keys = np.asarray(keys).astype(dtype=self.key.dtype, copy=False)
         idx = np.searchsorted(self.key, keys, side='left')
-        found_Q = (idx < self.key.size) & (self.key[idx] == keys)
+        in_range_Q = idx < self.key.size
+        found_Q = np.zeros(keys.shape, dtype=bool)
+        found_Q[in_range_Q] = self.key[idx[in_range_Q]] == keys[in_range_Q]
         result = np.full(keys.shape, not_found_val, dtype=self.value.dtype)
         result[found_Q] = self.value[idx[found_Q]]
         return result
