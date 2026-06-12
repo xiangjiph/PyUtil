@@ -106,7 +106,7 @@ def compute_percentile_outlier_threshold(x, ipr = 1.5):
     #       2.2 -> 3 sigma
     p25, p75 = np.nanpercentile(x, [25, 75])
     width = ipr * (p75 - p25)
-    return [p25 - width, p75 + width]
+    return [float(p25 - width), float(p75 + width)]
 
 def is_outerlier_by_percentile(x, ipr = 1.5):
     th = compute_percentile_outlier_threshold(x, ipr=ipr)

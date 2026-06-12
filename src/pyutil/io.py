@@ -322,10 +322,16 @@ def write_parquet(fp, data):
 #region Loading data 
 ####################
 def load_npz(fp, allow_pickle=True, key=None):
+    def _unwrap_npz_value(value): 
+        if isinstance(value, np.ndarray) and value.shape == (): 
+            return value.item()
+        return value
+    
     with np.load(fp, allow_pickle=allow_pickle) as data:
-        if key is not None:
-            return data[key]
-        return dict(data)
+        data = data[key] if key is not None else dict(data)
+        data = _unwrap_npz_value(data)
+        data = {k: _unwrap_npz_value(v) for k, v in data.items()} if isinstance(data, dict) else data
+        return data    
 
 def load_pickle(fp):
     with open(fp, 'rb') as file:

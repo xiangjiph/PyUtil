@@ -37,7 +37,9 @@ def spectral_power_lomb_scargle(t_s, signal, vis_Q=False):
 def compute_points_diffraction_2d(points, grid_size=1024, pad_factor=2,
     box=None, return_amplitude=False):
     """
-    Compute 2D diffraction intensity from N x 2 point coordinates.
+    Compute 2D diffraction intensity from N x 2 point coordinates by 
+    depositing them onto a raster grid and taking the FFT. Uses bilinear 
+    interpolation for smoother results than nearest-bin deposition.    
 
     Parameters
     ----------
@@ -158,7 +160,7 @@ def radial_average_intensity(
     Parameters
     ----------
     I : ndarray, shape (Ny, Nx)
-        Intensity map, e.g. output of diffraction_pattern_direct_nusum.
+        Intensity map, 
     qx, qy : ndarray
         Either 1D axes (Nx,) and (Ny,), or 2D mesh arrays matching I.
     bin_width : float or None

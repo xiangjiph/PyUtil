@@ -4,7 +4,7 @@ from sklearn.cluster import KMeans
 from scipy.stats import binned_statistic
 import matplotlib.pyplot as plt
 import pyutil.stat as py_stat
-from pyutil.geometry.point_cloud import PointCloud3DSurfaceFit
+import pyutil.geometry.point_cloud as pypc
 import pyutil
 
 
@@ -26,7 +26,9 @@ def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1):
     xcorr_vec_2i1 = np.zeros((pt_set_2.shape[0], num_nb, num_dim))
     for i in range(pt_set_2.shape[0]):
         xcorr_vec_2i1[i] = pt_set_1[idxs[i]] - pt_set_2[i]
+    
     # set 1 in set 2 cross-correlation
+    # for each set 1 point, find the nearest set 2 points. 
     dists, idxs = kdt_2.query(pt_set_1, k=num_nb)
     xcorr_vec_1i2 = np.zeros((pt_set_1.shape[0], num_nb, num_dim))
     for i in range(pt_set_1.shape[0]):
@@ -65,13 +67,13 @@ def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1):
     acorr_hist_2, _, _ = np.histogram2d(tmp_u_self, tmp_v_self, bins=num_bins,
                                             range=[x_range, y_range])
     result = {
-        'acorr_nb_vec_1': acorr_nb_vec_1,
-        'xcorr_vec_2i1': xcorr_vec_2i1,
-        'xcorr_vec_1i2': xcorr_vec_1i2,
-        'acorr_nb_vec_2': acorr_nb_vec_2,
-        'acorr_hist_1': acorr_hist_1,   
-        'xcorr_hist_2i1': xcorr_hist_2i1,
-        'xcorr_hist_1i2': xcorr_hist_1i2,
+        'acorr_nb_vec_1': acorr_nb_vec_1, # (num_pts_1, num_auto_nb, num_dim)
+        'xcorr_vec_2i1': xcorr_vec_2i1, # (num_pts_2, num_nb, num_dim)
+        'xcorr_vec_1i2': xcorr_vec_1i2, # (num_pts_1, num_nb, num_dim)
+        'acorr_nb_vec_2': acorr_nb_vec_2, # (num_pts_2, num_auto_nb, num_dim)
+        'acorr_hist_1': acorr_hist_1,   # (num_bins, num_bins)
+        'xcorr_hist_2i1': xcorr_hist_2i1, # (num_bins, num_bins)
+        'xcorr_hist_1i2': xcorr_hist_1i2, # (num_bins, num_bins)
         'acorr_hist_2': acorr_hist_2,
         'x_range': x_range,
         'y_range': y_range,
@@ -80,7 +82,7 @@ def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1):
 
 def compute_single_point_orientation_order(vecs, m_list): 
     # assume vecs are in shape (N, 2) and sorted 
-    # by the distnacen to the reference point. 
+    # by the distance to the reference point. 
     m_list = np.atleast_1d(np.asarray(m_list))
     vecs_n = vecs / np.linalg.norm(vecs, axis=-1, keepdims=True)
     theta = np.arctan2(vecs_n[:, 1], vecs_n[:, 0])
@@ -116,8 +118,11 @@ def compute_orientation_order(data_pts, max_dist, max_knn, m_list=None,
         if surf_obj is None: 
             tmp_vecs = data_pts[tmp_idx] - data_pts[i]
         else: 
-            tmp_vecs = PointCloud3DSurfaceFit.uvw_to_tangent_plane(data_pts[tmp_idx], data_pts[i], 
-                                                    surf_obj.coeffs)
+            if isinstance(surf_obj, pypc.PCSurface3D):
+                tmp_vecs = surf_obj.uvw_to_tangent_plane(data_pts[tmp_idx], data_pts[i])
+            else: 
+                tmp_vecs = pypc.PointCloud3DSurfaceFit.uvw_to_tangent_plane(data_pts[tmp_idx], data_pts[i], 
+                                                        surf_obj.coeffs)
         # consider the first 2 components at the moment 
         # Not sure how to deal with 3D 
         tmp_oo = compute_single_point_orientation_order(tmp_vecs[:, :2], m_list=m_list)
@@ -192,7 +197,7 @@ def analyze_orientation_order_correlation(data_pts, oo_knn, oo_max_dist,
                                           r_knn, r_max_dist, r_num_bins,
                                           match_oo_m_Q=True, surf_obj=None):
     
-    m_list = np.arange(3, oo_knn+1)
+    m_list = np.arange(2, oo_knn+1)
     pt_oo_info = compute_orientation_order(data_pts, oo_max_dist, oo_knn, m_list, 
                                            surf_obj=surf_obj)
     m_oo_corr = {}
@@ -272,8 +277,33 @@ def vis_syn_ctr_pos(ref_pts, ct_pts, ref_ct=None, ct=None,
     f.tight_layout()
     return f, a
 
+def vis_two_lattice_auto_corr(data, x_label='u (nm)', y_label='v (nm)', 
+                              cmap='jet'):
+    
+    f, a = plt.subplots(1, 2, figsize=(12, 5))
+    mi1_self_hist = data['acorr_hist_1'].T
+    ct_self_hist = data['acorr_hist_2'].T
+
+    im_1 = a[0].imshow(mi1_self_hist, extent=[data['x_range'][0], data['x_range'][-1], 
+                                        data['y_range'][0], data['y_range'][-1]], origin='lower', 
+                                        cmap=cmap)
+    cbar_1 = f.colorbar(im_1, ax=a[0], label='Count')
+    im_2 = a[1].imshow(ct_self_hist, extent=[data['x_range'][0], data['x_range'][-1], 
+                                        data['y_range'][0], data['y_range'][-1]], origin='lower', 
+                                        cmap=cmap)
+    cbar_2 = f.colorbar(im_2, ax=a[1], label='Count')
+
+    f.tight_layout()
+    a[0].set_xlabel(x_label)
+    a[0].set_ylabel(y_label)
+    a[0].grid(True)
+    a[1].set_xlabel(x_label)
+    a[1].set_ylabel(y_label)
+    a[1].grid(True)
+    return f, a
+
 def vis_two_lattice_xcorr(result, x_label='u (nm)', y_label='v (nm)', 
-                          xcorr_label='xcorr_hist_2i1'):
+                          xcorr_label='xcorr_hist_1i2'):
     vis_gamma = 1
     auto_im = pyutil.vis.imfuse_2d(result['acorr_hist_1'].T, result['acorr_hist_2'].T, gamma=vis_gamma)
     
@@ -282,12 +312,18 @@ def vis_two_lattice_xcorr(result, x_label='u (nm)', y_label='v (nm)',
     f, a = plt.subplots(1, 2, figsize=(10, 5))
     a[0].imshow(auto_im, extent=[result['x_range'][0], result['x_range'][-1], 
                                 result['y_range'][0], result['y_range'][-1]], origin='lower')
+    # a[1].scatter(result['acorr_nb_vec_1'][:, :, 0].flatten(), 
+    #              result['acorr_nb_vec_1'][:, :, 1].flatten(),
+    #              s=5, alpha=0.1)
     a[0].set_xlabel(x_label)
     a[0].set_ylabel(y_label)
     a[0].grid()
     a[0].set_aspect('equal')
     a[1].imshow(cross_im, extent=[result['x_range'][0], result['x_range'][-1], 
                                 result['y_range'][0], result['y_range'][-1]], origin='lower')
+    # a[1].scatter(result['xcorr_vec_1i2'][:, :, 0].flatten(), 
+    #              result['xcorr_vec_1i2'][:, :, 1].flatten(),
+    #              s=5, alpha=0.1)
     a[1].set_xlabel(x_label)
     a[1].set_ylabel(y_label)
     a[1].grid()
@@ -295,9 +331,9 @@ def vis_two_lattice_xcorr(result, x_label='u (nm)', y_label='v (nm)',
     f.tight_layout()
     return f, a
 
-def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, tmp_cp_proj_uvw, 
+def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, proj_uvw, 
                                      arrow_len=5000, x_label='u (nm)', y_label='v (nm)'): 
-    oo_idx = int(np.nonzero(pt_oo_info['m_list'] == m_fold_syn)[0])
+    oo_idx = np.flatnonzero(pt_oo_info['m_list'] == m_fold_syn).item()
     opt_oo = pt_oo_info['oo'][:, oo_idx]
     # opt_oo_arg = np.angle(opt_oo)
     # opt_oo_ep =  np.column_stack([
@@ -305,16 +341,16 @@ def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, tmp_cp_proj_uvw,
     #         tmp_cp_proj_uvw[:, 1] + arrow_len * np.sin(opt_oo_arg)
     # ])
     opt_oo_ep =  np.column_stack([
-            tmp_cp_proj_uvw[:, 0] + arrow_len * np.real(opt_oo), 
-            tmp_cp_proj_uvw[:, 1] + arrow_len * np.imag(opt_oo)
+            proj_uvw[:, 0] + arrow_len * np.real(opt_oo), 
+            proj_uvw[:, 1] + arrow_len * np.imag(opt_oo)
     ])
 
     # Visualize orientation of each point 
     f, a = plt.subplots(1, 1, figsize=(10, 6))
-    a.scatter(tmp_cp_proj_uvw[:, 0], tmp_cp_proj_uvw[:, 1],
+    a.scatter(proj_uvw[:, 0], proj_uvw[:, 1],
             c=pt_oo_info['m_oo_nn'], cmap='jet', 
-            s=20, vmin=3)
-    for tmp_uv, tmp_uv1 in zip(tmp_cp_proj_uvw[:, [0, 1]], opt_oo_ep): 
+            s=20)
+    for tmp_uv, tmp_uv1 in zip(proj_uvw[:, [0, 1]], opt_oo_ep): 
         plt.arrow(tmp_uv[0], tmp_uv[1], 
                   tmp_uv1[0]-tmp_uv[0], tmp_uv1[1]-tmp_uv[1], 
                 color='red', alpha=0.5)

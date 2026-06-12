@@ -614,7 +614,8 @@ class PolySurface3D:
         n_norm = np.linalg.norm(n, axis=-1, keepdims=True)
         return n / n_norm
 
-    def tangent_vectors(self, u, v, coeffs=None, exponents=None):
+    def tangent_vectors(self, u, v, coeffs=None, exponents=None, 
+                        align_axis=0, orthogonalized_Q=True):
         if coeffs is None:
             coeffs = self.coeffs
         if exponents is None:
@@ -622,10 +623,22 @@ class PolySurface3D:
         fu, fv, _, _, _ = PolySurface3D._poly_derivatives(u, v, coeffs, exponents)
         t_u = np.stack([np.ones_like(fu), np.zeros_like(fu), fu], axis=-1)
         t_v = np.stack([np.zeros_like(fv), np.ones_like(fv), fv], axis=-1)
-        t_u_norm = np.linalg.norm(t_u, axis=-1, keepdims=True)
-        e1 = t_u / t_u_norm
-        e2 = t_v - np.sum(t_v * e1, axis=-1, keepdims=True) * e1
-        e2 = e2 / np.linalg.norm(e2, axis=-1, keepdims=True)
+
+        t_u = t_u / np.linalg.norm(t_u, axis=-1, keepdims=True)
+        t_v = t_v / np.linalg.norm(t_v, axis=-1, keepdims=True)
+        if orthogonalized_Q: 
+            if align_axis == 0: 
+                e1 = t_u 
+                e2 = t_v - np.sum(t_v * e1, axis=-1, keepdims=True) * e1
+                e2 = e2 / np.linalg.norm(e2, axis=-1, keepdims=True)
+            elif align_axis == 1: 
+                e2 = t_v 
+                e1 = t_u - np.sum(t_u * e2, axis=-1, keepdims=True) * e2
+                e1 = e1 / np.linalg.norm(e1, axis=-1, keepdims=True)        
+            else: 
+                raise ValueError("align_axis must be 0 or 1")
+        else: 
+            e1, e2 = t_u, t_v
         return e1, e2
 
     def xyz_to_uvw(self, xyz):
@@ -662,15 +675,16 @@ class PolySurface3D:
 
     def project_xyz_points_to_surface(self, xyz_points,
                                       max_iter=100, tol=1e-6,
-                                      return_dist_Q=False):
+                                      return_dist_Q=False, 
+                                      return_xyz_Q=True):
         uvw = self.xyz_to_uvw(xyz_points)
         result = self.project_uvw_points_to_surface(
             uvw, max_iter=max_iter, tol=tol, return_dist_Q=return_dist_Q)
 
         if return_dist_Q:
             uvw_proj, dists = result
-            return self.uvw_to_xyz(uvw_proj), dists
-        return self.uvw_to_xyz(result)
+            return self.uvw_to_xyz(uvw_proj) if return_xyz_Q else uvw_proj, dists
+        return self.uvw_to_xyz(result) if return_xyz_Q else result
 
     def project_uvw_points_to_surface(self, uvw_points,
                                       max_iter=100, tol=1e-6,
@@ -832,6 +846,19 @@ class PCSurface3D(PolySurface3D):
         ss_res = np.sum(self.residuals_w ** 2)
         ss_tot = np.sum((self.points_uvw[:, 2] - self.points_uvw[:, 2].mean()) ** 2)
         return 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
+    
+    @property
+    def IQR_std(self):
+        return float(np.diff(np.percentile(self.residuals_w, [25, 75]))[0]) / 1.349
+
+    def compute_residual_stats(self, xyz): 
+        uvw = self.xyz_to_uvw(xyz)
+        res = self._uvw_to_residual(uvw)
+        ss_res = np.sum(res ** 2)
+        ss_tot = np.sum((uvw[:, 2] - uvw[:, 2].mean()) ** 2)
+        r2 = 1 - ss_res / ss_tot if ss_tot > 0 else 1.0
+        rmse = np.sqrt(ss_res / uvw.shape[0]) if uvw.shape[0] > 0 else 0.0
+        return r2, rmse
 
     def residual_ipr_range(self, ipr=1.5):
         return stat.compute_percentile_outlier_threshold(self.residuals_w, ipr=ipr)
@@ -912,7 +939,8 @@ class PCSurface3D(PolySurface3D):
                    cmap='coolwarm', vmin=-abs_max_res, vmax=abs_max_res)
         ax.set_xlabel("u")
         ax.set_ylabel("v")
-        fig.colorbar(ax.collections[0], ax=ax, label="Residual w")
+        ax.set_aspect('equal')
+        fig.colorbar(ax.collections[0], ax=ax, label="Residual")
         fig.tight_layout()
         return fig, ax
 

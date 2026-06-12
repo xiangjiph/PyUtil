@@ -184,7 +184,7 @@ def dict_of_dict_to_dict_of_array(dod, to_numpy_Q=True, key_name='key',
             result[k] = np.asarray(v)
     return result
 
-def select_val_by_num_repeat(id_list, min_syn_per_rid=1):
+def select_val_by_num_repeat(val, num_repeat=1):
     """Select root ids by the number of repeats.
     Input:
         rid_list: list or array of root ids
@@ -192,13 +192,13 @@ def select_val_by_num_repeat(id_list, min_syn_per_rid=1):
     Output:
         selected_Q: logical array, 1 for selected
     """
-    if min_syn_per_rid <= 1: 
-        return np.ones_like(id_list, dtype=bool)
+    if num_repeat <= 1: 
+        return np.ones_like(val, dtype=bool)
     else: 
-        id2idx = bin_data_to_idx_list(id_list, return_type='dict')
-        selected_Q = np.zeros_like(id_list, dtype=bool)
+        id2idx = bin_data_to_idx_list(val, return_type='dict')
+        selected_Q = np.zeros_like(val, dtype=bool)
         for k, v in id2idx.items():
-            if v.size >= min_syn_per_rid:
+            if v.size >= num_repeat:
                 selected_Q[v] = True
         return selected_Q
 
@@ -344,6 +344,16 @@ def reorder_pd_columns(df, leading_cols=None, trailing_cols=None):
             cols.remove(c)
             cols.append(c)
     return df[cols]
+
+def expand_scalar_to_vector(x, target_len):
+    """If x is a scalar, return a vector of length target_len with all values x."""
+    if np.isscalar(x):
+        return np.full(target_len, x)
+    else:
+        x = np.asarray(x)
+        if x.size != target_len:
+            raise ValueError(f"Input size {x.size} does not match target_len {target_len}")
+        return x
 
 class ScalarDict: 
     def __init__(self, key, value=None): 
