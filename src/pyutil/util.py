@@ -51,6 +51,12 @@ def bin_data_to_idx_list(data, return_type='list'):
     else: 
         raise ValueError(f"Unrecognized return_type. Options: 'list', 'dict'")
 
+def bin_data_to_idx_list_by_edge(data, bin_edge, return_type='list'):
+    data = np.asarray(data)
+    # below first edge 0, above last edge len(bin_edge), left-inclusive, right-exclusive
+    bin_idx = np.digitize(data, bin_edge) 
+    return bin_data_to_idx_list(bin_idx, return_type=return_type)
+
 def find_ind_in_sub_array(sub_array, ind, mask_size, select='all'):
     sub = np.hstack(np.unravel_index(ind, mask_size))[:, None]
     num_sub = sub_array.shape[1]

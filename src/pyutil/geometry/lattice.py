@@ -3,11 +3,13 @@ import scipy.spatial as sps
 from sklearn.cluster import KMeans
 from scipy.stats import binned_statistic
 import matplotlib.pyplot as plt
-import pyutil.stat as py_stat
-import pyutil.geometry.point_cloud as pypc
-import pyutil
+from .. import stat as py_stat
+from .. import vis as py_vis
+from .. import util as py_util
+from . import point_cloud as pypc
+from scipy.spatial import Voronoi
 
-
+# to be deleted. 
 def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1): 
     pt_set_1 = pt_set_1[np.all(np.isfinite(pt_set_1), axis=1)]
     pt_set_2 = pt_set_2[np.all(np.isfinite(pt_set_2), axis=1)]
@@ -80,7 +82,7 @@ def analyze_two_lattice_xcorr(pt_set_1, pt_set_2, num_nb=1, num_auto_nb=1):
     }
     return result
 
-def compute_single_point_orientation_order(vecs, m_list): 
+def compute_single_point_orientation_order(vecs, m_list, num_nb=4): 
     # assume vecs are in shape (N, 2) and sorted 
     # by the distance to the reference point. 
     m_list = np.atleast_1d(np.asarray(m_list))
@@ -88,16 +90,56 @@ def compute_single_point_orientation_order(vecs, m_list):
     theta = np.arctan2(vecs_n[:, 1], vecs_n[:, 0])
     psi_m = np.full(m_list.shape, fill_value=np.nan, dtype=np.complex64)
     for i, m in enumerate(m_list):
-        if m <= vecs.shape[0]:
-            psi_m[i] = np.sum(np.exp(1j * m * theta[:m])) / m
+        if num_nb is None: 
+            # This is not quite correct. 
+            # orientation order should be computed with fix number of
+            # neighbors. 
+            if m <= vecs.shape[0]:
+                psi_m[i] = np.sum(np.exp(1j * m * theta[:m])) / m
+        else: 
+            psi_m[i] = np.sum(np.exp(1j * m * theta[:num_nb])) / num_nb
 
     if len(m_list) == 1:
         psi_m = psi_m[0]
+    assert np.all((np.abs(psi_m) <= (1 + 1e-6)) | np.isnan(psi_m)), 'The magnitude of orientation order should be less than or equal to 1.'
+    return psi_m
 
+def compute_single_point_orientation_order_with_voronoi_neighbors(\
+        nb_vecs, m_list, weight_exponent=1, return_info_Q=False): 
+    nb_vecs = np.atleast_2d(nb_vecs)
+    all_vecs = np.vstack([np.asarray([[0, 0]]), nb_vecs]) # add self 
+    # Get neighbors using Voronoi tessellation
+    if all_vecs.shape[0] < 4:
+        # Not enough points to compute Voronoi tessellation
+        psi_m = np.full((len(m_list),), fill_value=np.nan, dtype=np.complex64)
+        if return_info_Q:
+            return psi_m, {'nb_theta': np.full((0,), fill_value=np.nan), 
+                           'nb_len': np.full((0,), fill_value=np.nan), 
+                           'weight': np.full((0,), fill_value=np.nan)}
+        return psi_m
+    vq = VoronoiQuery(all_vecs)
+    nb_idx, nb_len = vq.neighbors(0)
+    # compute neithbor theta 
+    vq_nb_vec = all_vecs[nb_idx]
+    vq_nb_vec = vq_nb_vec / np.linalg.norm(vq_nb_vec, axis=-1, keepdims=True)
+    vq_nb_theta = np.atleast_1d(np.arctan2(vq_nb_vec[:, 1], vq_nb_vec[:, 0]))
+    # weight by shared edge length 
+    weight = np.power(nb_len, weight_exponent)
+    weight = weight / np.sum(weight)
+
+    m_list = np.atleast_1d(np.asarray(m_list)).reshape(-1, 1)
+    psi_m = np.sum(weight * np.exp(1j * m_list * vq_nb_theta), axis=1)
+    if len(m_list) == 1:
+        psi_m = psi_m[0]
+
+    assert np.all((np.abs(psi_m) <= (1 + 1e-6)) | np.isnan(psi_m)), 'The magnitude of orientation order should be less than or equal to 1.'
+    if return_info_Q:
+        return psi_m, {'nb_theta': vq_nb_theta, 'nb_len': nb_len, 'weight': weight}
     return psi_m
 
 def compute_orientation_order(data_pts, max_dist, max_knn, m_list=None, 
-                              surf_obj=None): 
+                              surf_obj=None, align_axis=0,
+                              orthogonalized_Q=True): 
     pt_kdt = sps.cKDTree(data_pts)
     nb_dist, nb_idx = pt_kdt.query(data_pts, k=max_knn+1, distance_upper_bound=max_dist)
     nb_dist = nb_dist[:, 1:]
@@ -119,13 +161,16 @@ def compute_orientation_order(data_pts, max_dist, max_knn, m_list=None,
             tmp_vecs = data_pts[tmp_idx] - data_pts[i]
         else: 
             if isinstance(surf_obj, pypc.PCSurface3D):
-                tmp_vecs = surf_obj.uvw_to_tangent_plane(data_pts[tmp_idx], data_pts[i])
+                tmp_vecs = surf_obj.uvw_to_tangent_plane(data_pts[tmp_idx], data_pts[i], 
+                                                         align_axis=align_axis,
+                                                         orthogonalized_Q=orthogonalized_Q)
             else: 
                 tmp_vecs = pypc.PointCloud3DSurfaceFit.uvw_to_tangent_plane(data_pts[tmp_idx], data_pts[i], 
                                                         surf_obj.coeffs)
         # consider the first 2 components at the moment 
         # Not sure how to deal with 3D 
-        tmp_oo = compute_single_point_orientation_order(tmp_vecs[:, :2], m_list=m_list)
+        tmp_oo = compute_single_point_orientation_order(tmp_vecs[:, :2], m_list=m_list, 
+                                                        num_nb=max_knn)
         if np.all(np.isnan(tmp_oo)):
             continue
         tmp_oo_abs = np.abs(tmp_oo)
@@ -135,12 +180,22 @@ def compute_orientation_order(data_pts, max_dist, max_knn, m_list=None,
         pt_max_oo[i] = tmp_oo[tmp_max_idx]
         pt_oo_n[i] = tmp_oo_abs[tmp_max_idx]
     
+    knn_stat = {}
+    for tmp_m in m_list: 
+        tmp_nb_dist = nb_dist[:, :tmp_m] if tmp_m <= nb_dist.shape[1] else nb_dist
+        tmp_nb_dist = tmp_nb_dist[tmp_nb_dist <= max_dist]
+        tmp_stat = {'mean': np.mean(tmp_nb_dist), 'median': np.median(tmp_nb_dist),
+                    'p25': np.percentile(tmp_nb_dist, 25), 'p75': np.percentile(tmp_nb_dist, 75)}
+        knn_stat[int(tmp_m)] = tmp_stat
+
     result = {
         'm_list': m_list,
-        'oo': pt_oo,
-        'm_oo': pt_max_oo, 
-        'm_oo_nn': pt_max_oo_nb,
-        'm_oo_n': pt_oo_n,
+        'num_nb': max_knn,
+        'oo': pt_oo, # orientation order
+        'm_oo': pt_max_oo, # orientation order with maximum magnitude
+        'm_oo_nn': pt_max_oo_nb, # m that maximize the orientation order
+        'm_oo_n': pt_oo_n, # maximum orientation order magnitude
+        'knn_stat': knn_stat
     }
     return result
 
@@ -195,11 +250,15 @@ def compute_orientation_order_correlation(data_pts, pt_ori_order,
 
 def analyze_orientation_order_correlation(data_pts, oo_knn, oo_max_dist,  
                                           r_knn, r_max_dist, r_num_bins,
-                                          match_oo_m_Q=True, surf_obj=None):
+                                          match_oo_m_Q=False, surf_obj=None, 
+                                          align_axis=0,
+                                          orthogonalized_Q=True, 
+                                          m_list=None):
     
-    m_list = np.arange(2, oo_knn+1)
+    m_list = np.arange(2, oo_knn+1) if m_list is None else m_list
     pt_oo_info = compute_orientation_order(data_pts, oo_max_dist, oo_knn, m_list, 
-                                           surf_obj=surf_obj)
+                                           surf_obj=surf_obj, align_axis=align_axis,
+                                           orthogonalized_Q=orthogonalized_Q)
     m_oo_corr = {}
     for i, m in enumerate(m_list):        
         selection_Q = (pt_oo_info['m_oo_nn'] == m) if match_oo_m_Q else None
@@ -215,44 +274,47 @@ def analyze_orientation_order_correlation(data_pts, oo_knn, oo_max_dist,
             bin_oo_diff_mean_abs = np.abs(np.nanmean(bin_oo_diff[tmp_selected_Q], axis=0))
             bin_oo_diff_ptrl = np.abs(py_stat.percentile(bin_oo_diff[tmp_selected_Q], [25, 50, 75], axis=0))
 
-            m_oo_corr[m] = {
+            m_oo_corr[int(m)] = {
                 'bin_oo_diff': bin_oo_diff,
                 'hist_bin_val': hist_bin_val,
                 'bin_oo_diff_n': bin_oo_diff_n,
                 'bin_oo_diff_mean_abs': bin_oo_diff_mean_abs,
                 'bin_oo_diff_ptrl': bin_oo_diff_ptrl
             }
-            print(f"Finished analyzing orientation order correlation for m={m}.")
+            # print(f"Finished analyzing orientation order correlation for m={m}.")
         else: 
             print(f"No points with m_oo_nn={m}, skipping analysis.")
 
     return pt_oo_info, m_oo_corr    
 
-def vis_orientation_order_correlation(m_oo_corr, pt_oo_info, x_label='r (nm)', 
-                                      y_label='Orientation order correlation'):
-    
-    f, a = plt.subplots(2, 1, figsize=(6, 6))
+def vis_orientation_order_correlation(m_oo_corr, pt_oo_info, y_key='bin_oo_diff_mean_abs',
+                                      x_label='r (nm)', 
+                                      y_label='Orientation order correlation', 
+                                      normalized_dist_Q=False, title_prefix=''):
+    f, a = plt.subplots(1, 1, figsize=(6, 4))
+    if normalized_dist_Q: 
+        x_label = 'r / <a>'
     for i, syn_fold in enumerate(m_oo_corr.keys()):
         vis_data = m_oo_corr[syn_fold]
         vis_num_pts = np.sum(pt_oo_info['m_oo_nn'] == syn_fold)
         vis_x = vis_data['hist_bin_val']
-        bin_oo_diff_n = vis_data['bin_oo_diff_n']
-        bin_oo_diff_mean_abs = vis_data['bin_oo_diff_mean_abs']
-        bin_oo_diff_n[np.isnan(bin_oo_diff_n)] = 0
-        bin_oo_diff_mean_abs[np.isnan(bin_oo_diff_mean_abs)] = 0
-        a[0].plot(vis_x, bin_oo_diff_n, '-', label=f'{syn_fold}-fold ({vis_num_pts} pts)', alpha=0.7)
-        a[1].plot(vis_x, bin_oo_diff_mean_abs, '-', label=f'{syn_fold}-fold ({vis_num_pts} pts)', alpha=0.7)
+        if normalized_dist_Q: 
+            vis_x = vis_x / pt_oo_info['knn_stat'][syn_fold]['mean']
 
-    a[0].set_xlabel(x_label)
-    a[1].set_xlabel(x_label)
-    a[0].set_ylabel(y_label)
-    a[1].set_ylabel(y_label)
-    a[0].legend()
-    a[1].legend()
-    a[0].grid()
-    a[1].grid()
-    a[0].set_ylim(-0.05, 1.05)
-    a[1].set_ylim(-0.05, 1.05)
+        y_val = vis_data[y_key]
+        y_val[np.isnan(y_val)] = 0
+        tmp_label_str = f"{syn_fold}-fold ({vis_num_pts} pts)"
+        if 'ooc_avg_norm_lra' in vis_data:
+            tmp_label_str += f", LRA: {vis_data['ooc_avg_norm_lra']:.2e}"
+        a.plot(vis_x, y_val, '-', label=tmp_label_str, alpha=0.7)
+    a.grid()
+    a.set_xlabel(x_label)
+    a.set_ylabel(y_label)
+    a.set_ylim(-0.05, 1.05)
+    a.legend()
+    a.set_title(f"{title_prefix} OOC ({pt_oo_info['num_nb']}nn)")
+    f.tight_layout()
+
     return f, a
 
 def vis_syn_ctr_pos(ref_pts, ct_pts, ref_ct=None, ct=None, 
@@ -305,9 +367,9 @@ def vis_two_lattice_auto_corr(data, x_label='u (nm)', y_label='v (nm)',
 def vis_two_lattice_xcorr(result, x_label='u (nm)', y_label='v (nm)', 
                           xcorr_label='xcorr_hist_1i2'):
     vis_gamma = 1
-    auto_im = pyutil.vis.imfuse_2d(result['acorr_hist_1'].T, result['acorr_hist_2'].T, gamma=vis_gamma)
+    auto_im = py_vis.imfuse_2d(result['acorr_hist_1'].T, result['acorr_hist_2'].T, gamma=vis_gamma)
     
-    cross_im = pyutil.vis.imfuse_2d(result['acorr_hist_1'].T, result[xcorr_label].T, gamma=vis_gamma)
+    cross_im = py_vis.imfuse_2d(result['acorr_hist_1'].T, result[xcorr_label].T, gamma=vis_gamma)
 
     f, a = plt.subplots(1, 2, figsize=(10, 5))
     a[0].imshow(auto_im, extent=[result['x_range'][0], result['x_range'][-1], 
@@ -335,6 +397,11 @@ def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, proj_uvw,
                                      arrow_len=5000, x_label='u (nm)', y_label='v (nm)'): 
     oo_idx = np.flatnonzero(pt_oo_info['m_list'] == m_fold_syn).item()
     opt_oo = pt_oo_info['oo'][:, oo_idx]
+    c_val = pt_oo_info['m_oo_nn']
+    valid_Q = np.isfinite(c_val) & np.isfinite(opt_oo)
+    c_val = c_val[valid_Q]
+    proj_uvw = proj_uvw[valid_Q]
+    opt_oo = opt_oo[valid_Q]
     # opt_oo_arg = np.angle(opt_oo)
     # opt_oo_ep =  np.column_stack([
     #         tmp_cp_proj_uvw[:, 0] + arrow_len * np.cos(opt_oo_arg), 
@@ -347,9 +414,8 @@ def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, proj_uvw,
 
     # Visualize orientation of each point 
     f, a = plt.subplots(1, 1, figsize=(10, 6))
-    a.scatter(proj_uvw[:, 0], proj_uvw[:, 1],
-            c=pt_oo_info['m_oo_nn'], cmap='jet', 
-            s=20)
+    a.scatter(proj_uvw[:, 0], proj_uvw[:, 1], c=c_val, 
+              cmap='jet', s=20)
     for tmp_uv, tmp_uv1 in zip(proj_uvw[:, [0, 1]], opt_oo_ep): 
         plt.arrow(tmp_uv[0], tmp_uv[1], 
                   tmp_uv1[0]-tmp_uv[0], tmp_uv1[1]-tmp_uv[1], 
@@ -359,6 +425,7 @@ def vis_m_fold_orientation_order_map(pt_oo_info, m_fold_syn, proj_uvw,
     a.grid()
     a.set_xlabel(x_label)
     a.set_ylabel(y_label)
+    a.set_title(f"Orientation order map (m={m_fold_syn})")
     f.tight_layout()
     return f, a
 
@@ -443,7 +510,7 @@ def compute_translation_correlation(data_pts, G_mat, num_nb, max_dist, bin_width
         tmp_nb_rho = np.exp(1j * tmp_nb_vec_phi)
 
         tmp_nb_bin_idx = np.round(tmp_nb_dist / bin_width).astype(np.int32)
-        tmp_bin_idx = pyutil.util.bin_data_to_idx_list(tmp_nb_bin_idx, return_type='dict')
+        tmp_bin_idx = py_util.bin_data_to_idx_list(tmp_nb_bin_idx, return_type='dict')
         tmp_to = np.full(bin_edges.shape[0] - 1, np.nan, dtype=np.complex128)
         for k, idx_list in tmp_bin_idx.items():
             tmp_to[k] = np.mean(tmp_nb_rho[0][idx_list])
@@ -551,6 +618,27 @@ def vis_radial_distribution_function(result, title=None,
     return f, a
 
 #endregion
+
+#region Voronoi
+class VoronoiQuery:
+    def __init__(self, xy):
+        self.xy = np.asarray(xy, dtype=float)
+        self.vor = Voronoi(self.xy)
+        self.rp = self.vor.ridge_points
+        self.rv = np.asarray(self.vor.ridge_vertices)
+
+    def neighbors(self, i, remove_infinite_Q=True):
+        mask = np.any(self.rp == i, axis=1)
+        rp_i, rv_i = self.rp[mask], self.rv[mask]
+        neighbors = rp_i.sum(axis=1) - i
+        lengths = np.full(len(rv_i), np.inf)
+        finite = np.all(rv_i >= 0, axis=1)
+        v = self.vor.vertices
+        lengths[finite] = np.linalg.norm(v[rv_i[finite, 0]] - v[rv_i[finite, 1]], axis=1)
+        if remove_infinite_Q:
+            neighbors = neighbors[finite]
+            lengths = lengths[finite]
+        return neighbors, lengths
 
 #region Transformation
 def hexagonal_pq_to_xy(p, q, e_p=None, e_q=None, x_0=0, y_0=0):

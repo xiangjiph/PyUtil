@@ -899,3 +899,123 @@ def remove_outliers_2d_percentile(points, ipr=1.5):
 
 
 #endregion
+
+#region Fitting
+def fit_log_log(x, y, x_range=None, y_range=None, 
+                return_data_Q=False):
+    """
+    Fit a linear model to log-log transformed data.
+
+    Parameters
+    ----------
+    x : array-like
+        Independent variable data.
+    y : array-like
+        Dependent variable data.
+    x_range : tuple, optional
+        The range of x values to include in the fit. If None, no range is applied.
+    y_range : tuple, optional
+        The range of y values to include in the fit. If None, no range is applied.
+    return_data_Q : bool, default False
+        If True, return the filtered x and y data used for fitting.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the slope and intercept of the fitted line,
+        as well as the fitted values and residuals.
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    # Filter data based on x_min and x_max
+    valid_Q = (x > 0) & (y > 0)  # Ensure positive values for log transformation
+    if y_range is not None:
+        y_min, y_max = y_range
+        valid_Q &= (y >= y_min) & (y <= y_max)
+    if x_range is not None:
+        x_min, x_max = x_range
+        valid_Q &= (x >= x_min) & (x <= x_max)
+    x = x[valid_Q]
+    y = y[valid_Q]
+
+    # Log-transform the data
+    x_fit = np.log10(x)
+    y_fit = np.log10(y)
+
+    # Fit a linear model to the log-log data
+    slope, intercept = np.polyfit(x_fit, y_fit, 1)
+    r2 = np.corrcoef(x_fit, y_fit)[0, 1] ** 2
+    result = {
+        'n': int(len(x)),
+        'slope': float(slope),
+        'intercept': float(intercept),
+        'r2': float(r2),
+    }
+    if return_data_Q:
+        result['x'] = x
+        result['y'] = y
+        result['x_fit'] = x_fit
+        result['y_fit'] = y_fit
+
+    return result
+
+def fit_linear_log(x, y, x_range=None, y_range=None, 
+                return_data_Q=False):
+    """
+    Fit a linear model to linear-log transformed data.
+
+    Parameters
+    ----------
+    x : array-like
+        Independent variable data.
+    y : array-like
+        Dependent variable data.
+    x_range : tuple, optional
+        The range of x values to include in the fit. If None, no range is applied.
+    y_range : tuple, optional
+        The range of y values to include in the fit. If None, no range is applied.
+    return_data_Q : bool, default False
+        If True, return the filtered x and y data used for fitting.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the slope and intercept of the fitted line,
+        as well as the fitted values and residuals.
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    # Filter data based on x_min and x_max
+    valid_Q = (np.isfinite(x)) & (y > 0)  # Ensure positive values for log transformation
+    if y_range is not None:
+        y_min, y_max = y_range
+        valid_Q &= (y >= y_min) & (y <= y_max)
+    if x_range is not None:
+        x_min, x_max = x_range
+        valid_Q &= (x >= x_min) & (x <= x_max)
+    x = x[valid_Q]
+    y = y[valid_Q]
+
+    # Log-transform the data
+    x_fit = x
+    y_fit = np.log10(y)
+
+    # Fit a linear model to the log-linear data
+    slope, intercept = np.polyfit(x_fit, y_fit, 1)
+    r2 = np.corrcoef(x_fit, y_fit)[0, 1] ** 2
+    result = {
+        'n': int(len(x)),
+        'slope': float(slope),
+        'intercept': float(intercept),
+        'r2': float(r2),
+    }
+    if return_data_Q:
+        result['x'] = x
+        result['y'] = y
+        result['x_fit'] = x_fit
+        result['y_fit'] = y_fit
+
+    return result
+#endregion
