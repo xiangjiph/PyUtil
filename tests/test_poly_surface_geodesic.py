@@ -64,6 +64,67 @@ def test_geodesic_rejects_endpoint_off_surface():
         surface.geodesic_distance(uvw1, uvw2)
 
 
+def test_line_intersection_returns_plane_crossing():
+    surface = PolySurface3D(coeffs=[2.0, 0.0, 0.0], k=1)
+
+    intersections = surface.intersect_line(
+        line_point=np.array([0.5, -0.25, -1.0]),
+        line_direction=np.array([0.0, 0.0, 1.0]),
+    )
+
+    np.testing.assert_allclose(intersections, np.array([[0.5, -0.25, 2.0]]))
+
+
+def test_line_intersection_returns_all_real_roots():
+    surface = PolySurface3D(coeffs=[-1.0, 0.0, 0.0, 1.0, 0.0, 0.0], k=2)
+
+    intersections = surface.intersect_line(
+        line_point=np.array([0.0, 0.0, 0.0]),
+        line_direction=np.array([1.0, 0.0, 0.0]),
+    )
+
+    np.testing.assert_allclose(intersections, np.array([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))
+
+
+def test_line_intersection_keeps_small_high_order_terms():
+    coeffs = np.zeros(15, dtype=float)
+    coeffs[10] = 1e-14
+    surface = PolySurface3D(coeffs=coeffs, k=4)
+
+    intersections = surface.intersect_line(
+        line_point=np.array([0.0, 0.0, 1.0]),
+        line_direction=np.array([1.0, 0.0, 0.0]),
+    )
+
+    expected_u = np.power(1e14, 0.25)
+    np.testing.assert_allclose(
+        intersections,
+        np.array([[-expected_u, 0.0, 1.0], [expected_u, 0.0, 1.0]]),
+        rtol=1e-12,
+    )
+
+
+def test_line_intersection_accepts_xyz_line_coordinates():
+    theta = np.deg2rad(30.0)
+    R = np.array([
+        [np.cos(theta), -np.sin(theta), 0.0],
+        [np.sin(theta), np.cos(theta), 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+    t = np.array([10.0, -5.0, 3.0])
+    surface = PolySurface3D(coeffs=[2.0, 0.0, 0.0], k=1, R=R, t=t)
+    line_point_uvw = np.array([0.5, -0.25, -1.0])
+    line_direction_uvw = np.array([0.0, 0.0, 1.0])
+
+    intersections = surface.intersect_line(
+        line_point=surface.uvw_to_xyz(line_point_uvw)[0],
+        line_direction=line_direction_uvw @ surface.R.T,
+        local_Q=False,
+    )
+
+    np.testing.assert_allclose(intersections, np.array([[0.5, -0.25, 2.0]]), atol=1e-10)
+
+
 def test_pairwise_geodesic_distance_is_exact_on_plane_with_dense_graph():
     surface = PolySurface3D(coeffs=[0.2, 0.4, -0.3], k=1)
     uv = np.array([

@@ -3,6 +3,7 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.polynomial import polynomial as nppoly
 from scipy.optimize import minimize
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import connected_components, shortest_path
@@ -521,6 +522,63 @@ class PolySurface3D:
         uvw = self.xyz_to_uvw(xyz)
         return self._uvw_to_residual(uvw)
 
+    def intersect_line(
+        self,
+        line_point,
+        line_direction,
+        local_Q: bool = True,
+        return_xyz_Q: bool = False,
+        real_tol: float = 1e-7,
+        residual_tol: float = 1e-6,
+    ):
+        """Return all real intersections between a line and this surface.
+
+        ``line_point`` and ``line_direction`` are interpreted in local ``uvw``
+        coordinates when ``local_Q`` is true and in world ``xyz`` coordinates
+        otherwise. The solve reduces the surface-line residual to a 1D
+        polynomial in the line parameter.
+        """
+        line_point = np.asarray(line_point, dtype=float).reshape(3)
+        line_direction = np.asarray(line_direction, dtype=float).reshape(3)
+        if not np.all(np.isfinite(line_point)) or not np.all(np.isfinite(line_direction)):
+            raise ValueError("line_point and line_direction must be finite")
+        if np.linalg.norm(line_direction) == 0:
+            raise ValueError("line_direction must be nonzero")
+        if not local_Q:
+            line_point = self.xyz_to_uvw(line_point)[0]
+            line_direction = line_direction @ self.R
+
+        residual_poly = np.zeros(max(self.k, 1) + 1, dtype=float)
+        residual_poly[:2] = [line_point[2], line_direction[2]]
+        u_poly = np.asarray([line_point[0], line_direction[0]], dtype=float)
+        v_poly = np.asarray([line_point[1], line_direction[1]], dtype=float)
+        for coeff, (i, j) in zip(self.coeffs, self.exponents):
+            term = nppoly.polymul(nppoly.polypow(u_poly, i), nppoly.polypow(v_poly, j))
+            residual_poly[:term.size] -= coeff * term
+
+        # Do not drop small fitted high-order terms by magnitude.  In nanometer
+        # coordinates, those coefficients can still dominate at line parameters
+        # of tens of microns.
+        nonzero_idx = np.flatnonzero(residual_poly != 0)
+        if nonzero_idx.size == 0:
+            return np.zeros((0, 3), dtype=float)
+
+        roots = nppoly.polyroots(residual_poly[:nonzero_idx[-1] + 1])
+        real_Q = np.abs(roots.imag) <= real_tol * np.maximum(1.0, np.abs(roots.real))
+        s_values = np.sort(roots.real[real_Q])
+        if s_values.size == 0:
+            return np.zeros((0, 3), dtype=float)
+
+        unique_s = [s_values[0]]
+        for s in s_values[1:]:
+            if abs(s - unique_s[-1]) > real_tol * max(1.0, abs(s), abs(unique_s[-1])):
+                unique_s.append(s)
+        uvw = line_point + np.asarray(unique_s)[:, None] * line_direction
+        residual = self._uvw_to_residual(uvw)
+        keep_Q = np.isclose(residual, 0.0, atol=residual_tol, rtol=residual_tol)
+        uvw = uvw[keep_Q]
+        return self.uvw_to_xyz(uvw) if return_xyz_Q else uvw
+
     def remove_xyz_by_residual_threshold(self, xyz, inliner_range, return_res_Q=False,
                                          dctr_Q=False):
         inlier_Q, res = self.remove_xyz_by_residual_threshold_with_residual(
@@ -741,9 +799,10 @@ class PCSurface3D(PolySurface3D):
     def surface_range(self, ipr=None): 
         """If ipr is provided, compute the inter-percentile range of residuals; 
         otherwise, return the range provided in initialization."""
-        if ipr is not None:
+        if (ipr is not None):
             return self.residual_ipr_range(ipr=ipr)
         else:             
+            assert len(self.residual_range) == 2 and self.residual_range[0] <= self.residual_range[1], "residual_range must be a tuple (min, max) with min <= max"
             return self.residual_range 
 
     @cached_property
