@@ -437,10 +437,7 @@ def _compute_knn_disp_vec(data_pts, num_nb):
     # remove self
     nb_dist = nb_dist[:, 1:]
     nb_idx = nb_idx[:, 1:]
-    nb_vec = np.zeros((data_pts.shape[0], num_nb, data_pts.shape[1]))
-    for i in range(data_pts.shape[0]):
-        nb_vec[i] = data_pts[nb_idx[i]] - data_pts[i]
-    
+    nb_vec = data_pts[nb_idx] - data_pts[:, None, :]    
     return nb_vec, nb_dist, pt_kdt   
 
 def compute_lattice_unit_vector_2d(data_pts, num_nb, max_dist, return_kdt_Q=False): 

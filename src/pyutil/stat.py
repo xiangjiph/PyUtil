@@ -101,6 +101,78 @@ def compute_stat_by_idx_bin(data_1d, bin_idx:list, stat_list=['mean', 'std'],
     
     return bin_stat
 
+def compute_radial_distribution_density(d, num_bins=10, bin_edge=None):
+    """Compute an area-normalized radial density from radial distances.
+
+    Parameters
+    ----------
+    d : array-like, shape (N,)
+        Radial distances. Values must be non-negative. Non-finite values are
+        ignored.
+    num_bins : int, default 10
+        Number of radial bins to use when ``bin_edge`` is not provided.
+    bin_edge : array-like, optional
+        Radial bin edges. When omitted, bins span from 0 to the largest
+        observed distance.
+
+    Returns
+    -------
+    dict
+        Summary statistics for the input distances and the radial density.
+        ``probability`` is the fraction of points in each radial bin, and
+        ``pdf`` is ``probability`` divided by the annulus area
+        ``pi * (r_outer**2 - r_inner**2)``.
+    """
+    d = np.asarray(d, dtype=float).ravel()
+    d = d[np.isfinite(d)]
+    if np.any(d < 0):
+        raise ValueError("Radial distances must be non-negative")
+
+    if bin_edge is None:
+        max_d = float(np.max(d)) if d.size else 1.0
+        if max_d <= 0:
+            max_d = 1.0
+        bin_edge = np.linspace(0, max_d, int(num_bins) + 1)
+    else:
+        bin_edge = np.asarray(bin_edge, dtype=float).ravel()
+        num_bins = bin_edge.size - 1
+    if bin_edge.size < 2 or not np.all(np.diff(bin_edge) > 0):
+        raise ValueError("bin_edge must contain at least two strictly increasing values")
+
+    hist_count, bin_edge = np.histogram(d, bins=bin_edge)
+    bin_val = (bin_edge[:-1] + bin_edge[1:]) / 2
+    bin_area = np.pi * (bin_edge[1:] ** 2 - bin_edge[:-1] ** 2)
+    probability = hist_count / np.sum(hist_count) if np.sum(hist_count) > 0 else np.zeros_like(bin_val)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        pdf = probability / bin_area
+
+    radial_bin_width = bin_edge[1:] - bin_edge[:-1]
+    radial_probability = pdf / np.sum(pdf)
+    radial_pdf = radial_probability / radial_bin_width
+    radial_cdf = np.concatenate(([0], np.cumsum(radial_pdf * radial_bin_width)))
+    radial_mean = np.sum(bin_val * radial_probability)
+    radial_std = np.sqrt(np.sum((bin_val - radial_mean) ** 2 * radial_probability))
+    radial_median = np.interp(0.5, radial_cdf, bin_edge)
+    return {
+        "num_data": int(d.size),
+        "mean": float(np.mean(d)) if d.size else np.nan,
+        "median": float(np.median(d)) if d.size else np.nan,
+        "std": float(np.std(d)) if d.size else np.nan,
+        "num_bins": int(num_bins),
+        "bin_val": bin_val,
+        "bin_edge": bin_edge,
+        "bin_area": bin_area,
+        "hist_count": hist_count,
+        "probability": probability,
+        "pdf": pdf,
+        "radial_probability": radial_probability,
+        "radial_pdf": radial_pdf,
+        "radial_cdf": radial_cdf,
+        "radial_mean": float(radial_mean) if np.isfinite(radial_mean) else np.nan,
+        "radial_std": float(radial_std) if np.isfinite(radial_std) else np.nan,
+        "radial_median": float(radial_median) if np.isfinite(radial_median) else np.nan,
+    }
+
 def compute_percentile_outlier_threshold(x, ipr = 1.5):
     # ipr = 1.5 -> 2 sigma
     #       2.2 -> 3 sigma
@@ -783,120 +855,6 @@ def remove_outliers_2d_percentile(points, ipr=1.5):
     dist_2_med = np.linalg.norm(dist_2_med, axis=1)
     inlier_Q = is_inlier_by_percentile(dist_2_med, ipr=ipr)
     return points[inlier_Q]
-
-# from scipy.stats import chi2
-# from sklearn.covariance import MinCovDet
-
-# def reject_outliers_2d_mcd(
-#     points: np.ndarray,
-#     keep_fraction: float = 0.99,
-#     assume_centered: bool = False,
-#     support_fraction: float | None = None,
-#     return_diagnostics: bool = False,
-# ) -> tuple[np.ndarray, np.ndarray] | tuple[np.ndarray, np.ndarray, dict]:
-#     """
-#     Robust 2D outlier rejection using robust Mahalanobis distance.
-
-#     This uses Minimum Covariance Determinant (MCD) to estimate a robust center
-#     and covariance, then rejects points outside the chi-square quantile contour.
-
-#     Parameters
-#     ----------
-#     points
-#         Array of shape (n_samples, 2).
-#     keep_fraction
-#         Fraction of inlier mass to keep, interpreted as a 2D joint quantile.
-#         Example: 0.99 keeps the central 99% ellipse under the robust model.
-#     assume_centered
-#         Passed to MinCovDet. Set True only if the true center is known to be near zero.
-#     support_fraction
-#         Passed to MinCovDet. Smaller values can be more robust but may be less stable.
-#         None lets sklearn choose automatically.
-#     return_diagnostics
-#         If True, also return a dict with robust center, covariance, distances,
-#         threshold, and raw estimator.
-
-#     Returns
-#     -------
-#     inlier_mask
-#         Boolean array of shape (n_samples,), True for retained points.
-#     filtered_points
-#         Array of retained points with shape (n_inliers, 2).
-#     diagnostics
-#         Returned only if return_diagnostics=True.
-
-#     Raises
-#     ------
-#     ValueError
-#         If inputs are invalid or there are too few points.
-
-#     Notes
-#     -----
-#     The squared Mahalanobis distance is compared to the chi-square cutoff
-#     with 2 degrees of freedom:
-
-#         d^2 <= chi2.ppf(keep_fraction, df=2)
-
-#     This works well when the inlier cloud is approximately elliptical, even if
-#     strongly correlated. It is much better than per-axis percentile clipping
-#     for tilted point clouds.
-#     """
-#     points = np.asarray(points, dtype=float)
-
-#     if points.ndim != 2 or points.shape[1] != 2:
-#         raise ValueError(f"`points` must have shape (n_samples, 2), got {points.shape}.")
-#     if len(points) < 5:
-#         raise ValueError("Need at least 5 points for robust 2D covariance estimation.")
-#     if not (0.0 < keep_fraction < 1.0):
-#         raise ValueError("`keep_fraction` must be strictly between 0 and 1.")
-
-#     # Remove rows with non-finite values before fitting.
-#     finite_mask = np.isfinite(points).all(axis=1)
-#     if not np.all(finite_mask):
-#         clean_points = points[finite_mask]
-#     else:
-#         clean_points = points
-
-#     if len(clean_points) < 5:
-#         raise ValueError("Too few finite points after removing NaN/Inf rows.")
-
-#     # Robust location and covariance estimate.
-#     mcd = MinCovDet(
-#         assume_centered=assume_centered,
-#         support_fraction=support_fraction,
-#         random_state=0,
-#     )
-#     mcd.fit(clean_points)
-
-#     # Robust squared Mahalanobis distances on finite points.
-#     d2_clean = mcd.mahalanobis(clean_points)
-
-#     # 2D joint quantile cutoff.
-#     threshold = chi2.ppf(keep_fraction, df=2)
-
-#     inlier_mask_clean = d2_clean <= threshold
-
-#     # Rebuild mask against original input shape.
-#     inlier_mask = np.zeros(len(points), dtype=bool)
-#     inlier_mask[finite_mask] = inlier_mask_clean
-
-#     filtered_points = points[inlier_mask]
-
-#     if not return_diagnostics:
-#         return inlier_mask, filtered_points
-
-#     diagnostics = {
-#         "robust_center": mcd.location_.copy(),
-#         "robust_covariance": mcd.covariance_.copy(),
-#         "squared_mahalanobis": np.where(finite_mask, np.nan, np.nan),  # placeholder
-#         "threshold": threshold,
-#         "estimator": mcd,
-#     }
-#     diagnostics["squared_mahalanobis"] = np.full(len(points), np.nan, dtype=float)
-#     diagnostics["squared_mahalanobis"][finite_mask] = d2_clean
-
-#     return inlier_mask, filtered_points, diagnostics
-
 
 #endregion
 

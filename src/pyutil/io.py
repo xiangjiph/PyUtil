@@ -571,11 +571,13 @@ def print_image(fig_hdl, fig_fp, verbose_Q=True, close_fig_Q=False):
 
 def print_image_in_several_formats(fig_hdl, fig_fp, format_list=['.pdf', '.pickle', '.png'], verbose_Q=True):
     fn, ext = os.path.splitext(fig_fp)
-    if ext not in format_list:
+    if ext not in format_list and len(ext) > 0:
         format_list.append(ext)
     for ie in format_list:
         ifn = fn + ie
-        print_image(fig_hdl, ifn, verbose_Q=verbose_Q)
+        print_image(fig_hdl, ifn, verbose_Q=False)
+    if verbose_Q:
+        print('Finish saving figure in several formats: {:s}'.format(fig_fp))
 
 def load_matplotlib_pickle_file(fp):
     with open(fp, 'rb') as f:
