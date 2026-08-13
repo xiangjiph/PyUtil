@@ -1,6 +1,7 @@
 import scipy.ndimage as ndi
 import numpy as np
 import pandas as pd
+import scipy as sp
 
 def medfilt3(block, size=3, chunks=None):
     import dask.array as da 
@@ -76,3 +77,58 @@ def moving_average_1d(x, window_size, min_periods=None):
     moving_avg = x.rolling(window=window_size, min_periods=min_periods,
                             center=True).mean().to_numpy()
     return moving_avg
+
+def find_peaks_in_irregular_sampled_data(x, y, min_dist): 
+    """
+    Find peaks in irregularly sampled data.
+
+    Parameters
+    ----------
+    x : array-like
+        The x-coordinates of the data.
+    y : array-like
+        The y-coordinates of the data.
+    min_dist : float
+        The minimum distance between peaks.
+
+    Returns
+    -------
+    p_x : array-like
+        The x-coordinates of the peaks.
+    p_val : array-like
+        The y-coordinates of the peaks.
+    p_idx : array-like
+        The indices of the peaks in the original data.
+    """
+    assert len(x) == len(y), "x and y must have the same length"
+    assert min_dist > 0, "min_dist must be positive"
+
+    if not np.all(x[1:] > x[:-1]):
+        sort_idx = np.argsort(x)
+        x = x[sort_idx]
+        y = y[sort_idx]
+
+    p_idx = sp.signal.find_peaks(y)[0]
+    p_val = y[p_idx]
+    p_x = x[p_idx]
+    n = p_idx.size
+    priority = np.argsort(p_val)[::-1]
+    kept_Q = np.ones_like(p_val, dtype=bool)
+    for i in priority: 
+        if not kept_Q[i]: 
+            continue
+        xi = p_x[i]
+        # left
+        j = i - 1
+        while j >= 0 and (xi - p_x[j]) < min_dist: 
+            kept_Q[j] = False
+            j -= 1
+        # right
+        j = i + 1
+        while j < n and (p_x[j] - xi) < min_dist: 
+            kept_Q[j] = False
+            j += 1 
+    p_x = p_x[kept_Q]
+    p_val = p_val[kept_Q]
+    p_idx = p_idx[kept_Q]
+    return p_x, p_val, p_idx

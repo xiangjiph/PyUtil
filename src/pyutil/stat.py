@@ -474,42 +474,62 @@ def rebin_histogram(
     *,
     input_is_pdf: bool = False,
     output_pdf: bool = False,
-    even_tol: float = 1e-5
+    even_tol: float = 1e-5,
+    bin_val_is_edge_Q: bool = False,
+    new_bin_val_is_edge_Q: bool = False,
 ) -> np.ndarray:
     """
     Re-bin a 1D histogram from original bin centers to new bin centers via
-    linear interpolation of the cumulative distribution (CDF). This preserves
-    area/total count.
+    linear interpolation of the cumulative distribution (CDF).
+
+    Use exact bin edges when they are provided. Otherwise infer bin edges from
+    adjacent center midpoints. Treat each input bin as piecewise constant and
+    integrate that density over the target bins. This preserves total mass and
+    supports non-uniform original and target bins.
 
     Parameters
     ----------
     bin_val : (N,) np.ndarray
-        Original bin centers (assumed evenly spaced and strictly increasing).
+        Original bin centers by default. If `bin_val_is_edge_Q=True`, pass
+        original bin edges with length `len(count) + 1`. Values must be
+        strictly increasing.
     count : (N,) np.ndarray
         Values at the original bins. If `input_is_pdf=False` these are counts
         (mass per bin). If `input_is_pdf=True` these are PDF values
         (mass per unit x) sampled at bin centers and assumed constant within
         each bin.
     new_bin_val : (M,) np.ndarray
-        Target bin centers (assumed evenly spaced and strictly increasing).
+        Target bin centers by default. If `new_bin_val_is_edge_Q=True`, pass
+        target bin edges and the returned array has length `len(new_bin_val)-1`.
+        Values must be strictly increasing.
     input_is_pdf : bool, default False
         When True, `count` is treated as PDF values; otherwise as bin counts.
     output_pdf : bool, default False
         When True, returns a PDF at `new_bin_val`; otherwise returns counts
         per new bin.
-    even_tol : float, default 1e-9
-        Tolerance for checking even spacing.
+    even_tol : float, default 1e-5
+        Retained for API compatibility. The function no longer requires evenly
+        spaced bins.
+    bin_val_is_edge_Q : bool, default False
+        Treat `bin_val` as original bin edges instead of centers.
+    new_bin_val_is_edge_Q : bool, default False
+        Treat `new_bin_val` as target bin edges instead of centers.
 
     Returns
     -------
     np.ndarray
-        Re-binned values aligned with `new_bin_val`. Type matches `output_pdf`.
+        Re-binned values aligned with `new_bin_val`. Returns per-bin mass when
+        `output_pdf=False` and per-unit-x density when `output_pdf=True`.
 
     Notes
     -----
-    * Original and new bin spacings are inferred from the centers.
+    * When centers are supplied, bin edges are inferred from midpoint
+      boundaries between centers. The two outer edge widths use the nearest
+      adjacent center spacing.
+    * If `new_bin_val` has one element, its bin width is set to the median
+      inferred source-bin width.
     * Outside the support of the original histogram, mass is taken as 0.
-    * Complexity is O(N + M), using vectorized NumPy operations.
+    * The calculation is vectorized over the target bin edges.
     """
 
     bin_val = np.asarray(bin_val, dtype=float)
@@ -518,51 +538,38 @@ def rebin_histogram(
 
     if bin_val.ndim != 1 or count.ndim != 1 or new_bin_val.ndim != 1:
         raise ValueError("All inputs must be 1D arrays.")
-    if len(bin_val) != len(count):
+    if bin_val_is_edge_Q:
+        if len(bin_val) != len(count) + 1:
+            raise ValueError("bin_val must have len(count) + 1 values when bin_val_is_edge_Q=True.")
+    elif len(bin_val) != len(count):
         raise ValueError("bin_val and count must have the same length.")
-    if len(bin_val) < 2 or len(new_bin_val) < 1:
-        raise ValueError("Need at least 2 original bins and 1 target bin.")
+    if (not bin_val_is_edge_Q and len(bin_val) < 2) or (bin_val_is_edge_Q and len(bin_val) < 2):
+        raise ValueError("Need at least 1 original bin edge interval or 2 original bin centers.")
+    if (not new_bin_val_is_edge_Q and len(new_bin_val) < 1) or (new_bin_val_is_edge_Q and len(new_bin_val) < 2):
+        raise ValueError("Need at least 1 target bin center or 1 target bin edge interval.")
 
     # Ensure strictly increasing
     if not (np.all(np.diff(bin_val) > 0) and np.all(np.diff(new_bin_val) > 0)):
         raise ValueError("bin_val and new_bin_val must be strictly increasing.")
 
-    # Original spacing (must be even)
-    dxs = np.diff(bin_val)
-    dx  = float(np.mean(dxs))
-    if np.max(np.abs(dxs - dx)) > even_tol * max(1.0, abs(dx)):
-        raise ValueError("bin_val must be evenly spaced within tolerance.")
-
-    # New spacing (must be even)
-    if len(new_bin_val) > 1:
-        ndxs = np.diff(new_bin_val)
-        ndx  = float(np.mean(ndxs))
-        if np.max(np.abs(ndxs - ndx)) > even_tol * max(1.0, abs(ndx)):
-            raise ValueError("new_bin_val must be evenly spaced within tolerance.")
-    else:
-        # If only one new bin, choose the same width as original for PDF conversion
-        ndx = dx
-
-    # Build original edges from centers
-    edges = np.concatenate(([bin_val[0] - 0.5 * dx],
-                            0.5 * (bin_val[1:] + bin_val[:-1]),
-                            [bin_val[-1] + 0.5 * dx]))
+    edges = bin_val if bin_val_is_edge_Q else _histogram_edges_from_centers(bin_val)
+    dx = np.diff(edges)
+    new_edges = new_bin_val if new_bin_val_is_edge_Q else _histogram_edges_from_centers(new_bin_val, single_width=float(np.median(dx)))
+    ndx = np.diff(new_edges)
 
     # Convert inputs to per-bin mass and per-bin density
     if input_is_pdf:
-        # mass in each original bin = pdf * dx (assume piecewise-constant within bin)
         bin_mass = count * dx
-        density  = count                  # mass per unit x within each bin
+        density = count
     else:
         bin_mass = count
-        density  = bin_mass / dx          # mass per unit x within each bin
+        density = bin_mass / dx
 
     # CDF at left edges: cdf_edges[i] = mass up to edges[i]
     cdf_edges = np.concatenate(([0.0], np.cumsum(bin_mass)))
-    total_mass = cdf_edges[-1]
 
     # Helper: evaluate CDF at arbitrary x via linear-in-bin interpolation.
-    # Vectorized with searchsorted; outside support is clamped to [0, total_mass].
+    # Vectorized with searchsorted; outside support is clamped to source edges.
     def cdf_at(x: np.ndarray) -> np.ndarray:
         x = np.asarray(x, dtype=float)
         # Clip to support to keep indices valid; below becomes edges[0], above edges[-1]
@@ -574,22 +581,31 @@ def rebin_histogram(
         # CDF is linear within bin with slope = density[j]
         return cdf_edges[j] + density[j] * dx_in
 
-    # New bin edges from new centers
-    new_edges = np.concatenate(([new_bin_val[0] - 0.5 * ndx],
-                                0.5 * (new_bin_val[1:] + new_bin_val[:-1]),
-                                [new_bin_val[-1] + 0.5 * ndx]))
-
     # Re-binned mass per new bin via CDF difference
     cdf_right = cdf_at(new_edges[1:])
     cdf_left  = cdf_at(new_edges[:-1])
     new_mass  = cdf_right - cdf_left
 
     if output_pdf:
-        # Convert mass back to density (PDF) on the new uniform grid
         new_pdf = new_mass / ndx
         return new_pdf
     else:
         return new_mass
+
+
+def _histogram_edges_from_centers(bin_val: np.ndarray, single_width=None) -> np.ndarray:
+    """Infer bin edges from sorted bin centers."""
+    bin_val = np.asarray(bin_val, dtype=float)
+    if bin_val.size == 1:
+        if single_width is None:
+            raise ValueError("single_width is required for one bin center.")
+        width = float(single_width)
+        return np.asarray([bin_val[0] - 0.5 * width, bin_val[0] + 0.5 * width])
+    return np.concatenate((
+        [bin_val[0] - 0.5 * (bin_val[1] - bin_val[0])],
+        0.5 * (bin_val[1:] + bin_val[:-1]),
+        [bin_val[-1] + 0.5 * (bin_val[-1] - bin_val[-2])],
+    ))
 
 def otsu_threshold_from_hist(counts: np.ndarray, edges: np.ndarray, 
                              max_margin_Q=False) -> float:
