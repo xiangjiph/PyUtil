@@ -811,7 +811,14 @@ class PCSurface3D(PolySurface3D):
 
     def vis_points_w_fitted_surface(self, grid_res=80, pad=0.05,
                                     vis_frame='world', fig=None, ax=None,
-                                    vis_pts_Q=True, label=None):
+                                    vis_pts_Q=True, label=None, 
+                                    vis_unit='nm'):
+        if vis_unit in ['nm']: 
+            scale = 1.0
+        elif vis_unit in ['um', 'µm']: 
+            scale = 1e-3
+        else: 
+            raise NotImplementedError
         P = self.points_xyz
         L = self.points_uvw
         u, v = L[:, 0], L[:, 1]
@@ -832,18 +839,20 @@ class PCSurface3D(PolySurface3D):
 
         if vis_frame == 'local':
             if vis_pts_Q:
-                ax.scatter(L[:, 0], L[:, 1], L[:, 2], s=1, alpha=0.9)
-            ax.plot_surface(U, V, W, alpha=0.25, linewidth=0, label=label)
+                ax.scatter(L[:, 0] * scale, L[:, 1] * scale, L[:, 2] * scale, s=1, alpha=0.9)
+            ax.plot_surface(U * scale, 
+                            V * scale, 
+                            W * scale, alpha=0.25, linewidth=0, label=label)
         else:
             if vis_pts_Q:
                 ax.scatter(P[:, 0], P[:, 1], P[:, 2], s=1, alpha=0.9)
-            world_grid = self.uvw_to_xyz(np.stack([U, V, W], axis=-1))
+            world_grid = self.uvw_to_xyz(np.stack([U, V, W], axis=-1)) * scale
             ax.plot_surface(world_grid[..., 0], world_grid[..., 1],
                             world_grid[..., 2], alpha=0.25, linewidth=0, label=label)
 
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
+        ax.set_xlabel(f"X ({vis_unit})")
+        ax.set_ylabel(f"Y ({vis_unit})")
+        ax.set_zlabel(f"Z ({vis_unit})")
         ax.set_title(f"Order-{self.k} polynomial surface fit in {vis_frame} frame")
         plt.tight_layout()
         return fig, ax

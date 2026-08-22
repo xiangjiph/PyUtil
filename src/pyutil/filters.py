@@ -78,7 +78,7 @@ def moving_average_1d(x, window_size, min_periods=None):
                             center=True).mean().to_numpy()
     return moving_avg
 
-def find_peaks_in_irregular_sampled_data(x, y, min_dist): 
+def find_peaks_in_irregular_sampled_data(x, y, min_dist, fill_gap_Q=False): 
     """
     Find peaks in irregularly sampled data.
 
@@ -88,8 +88,12 @@ def find_peaks_in_irregular_sampled_data(x, y, min_dist):
         The x-coordinates of the data.
     y : array-like
         The y-coordinates of the data.
-    min_dist : float
+    min_dist : float or array-like
         The minimum distance between peaks.
+    fill_gap_Q : bool, default False
+        Insert low-valued samples into large x-gaps before calling
+        ``scipy.signal.find_peaks`` so isolated edge clusters can contribute
+        local maxima without changing the default behavior.
 
     Returns
     -------
@@ -101,34 +105,98 @@ def find_peaks_in_irregular_sampled_data(x, y, min_dist):
         The indices of the peaks in the original data.
     """
     assert len(x) == len(y), "x and y must have the same length"
-    assert min_dist > 0, "min_dist must be positive"
+    x = np.asarray(x)
+    y = np.asarray(y)
+    orig_idx = np.arange(len(x))
+    min_dist = np.asarray(min_dist)
+    assert np.all(min_dist > 0), "min_dist must be positive"
+    if min_dist.size == 1:
+            min_dist = np.full(len(x), min_dist)
+    else:
+        assert min_dist.size == len(x), "min_dist must be scalar or match x"
 
     if not np.all(x[1:] > x[:-1]):
         sort_idx = np.argsort(x)
         x = x[sort_idx]
         y = y[sort_idx]
+        orig_idx = orig_idx[sort_idx]
+        min_dist = min_dist[sort_idx]
 
-    p_idx = sp.signal.find_peaks(y)[0]
-    p_val = y[p_idx]
-    p_x = x[p_idx]
-    n = p_idx.size
+    peak_x = x
+    peak_y = y
+    peak_orig_idx = orig_idx
+    peak_min_dist = min_dist
+    if fill_gap_Q and len(x) >= 2:
+        gap_dist = x[1:] - x[:-1]
+        gap_th = np.maximum(min_dist[:-1], min_dist[1:])
+        gap_idx = np.where(gap_dist > gap_th)[0]
+        if gap_idx.size > 0:
+            gap_x = (x[gap_idx] + x[gap_idx + 1]) / 2.0
+            gap_y = np.full(gap_idx.size, np.nextafter(np.nanmin(np.asarray(y, dtype=float)), -np.inf))
+            gap_orig_idx = np.full(gap_idx.size, -1, dtype=int)
+            gap_min_dist = gap_th[gap_idx]
+            peak_x = np.concatenate((x, gap_x))
+            peak_y = np.concatenate((np.asarray(y, dtype=float), gap_y))
+            peak_orig_idx = np.concatenate((orig_idx, gap_orig_idx))
+            peak_min_dist = np.concatenate((min_dist, gap_min_dist))
+            sort_idx = np.argsort(peak_x)
+            peak_x = peak_x[sort_idx]
+            peak_y = peak_y[sort_idx]
+            peak_orig_idx = peak_orig_idx[sort_idx]
+            peak_min_dist = peak_min_dist[sort_idx]
+
+    peak_idx = sp.signal.find_peaks(peak_y)[0]
+    valid_peak_Q = peak_orig_idx[peak_idx] >= 0
+    peak_idx = peak_idx[valid_peak_Q]
+    p_idx = peak_orig_idx[peak_idx]
+    p_val = peak_y[peak_idx]
+    p_x = peak_x[peak_idx]
+    p_min_dist = peak_min_dist[peak_idx]
+    n = peak_idx.size
     priority = np.argsort(p_val)[::-1]
     kept_Q = np.ones_like(p_val, dtype=bool)
+    accepted_Q = np.zeros_like(p_val, dtype=bool)
     for i in priority: 
         if not kept_Q[i]: 
             continue
         xi = p_x[i]
+        tmp_min_dist = p_min_dist[i]
+
+        # A lower-priority peak should not evict a higher-priority peak that is
+        # already kept, but its own exclusion radius still applies to acceptance.
+        reject_Q = False
+        j = i - 1
+        while j >= 0 and (xi - p_x[j]) < tmp_min_dist:
+            if accepted_Q[j]:
+                reject_Q = True
+                break
+            j -= 1
+        if not reject_Q:
+            j = i + 1
+            while j < n and (p_x[j] - xi) < tmp_min_dist:
+                if accepted_Q[j]:
+                    reject_Q = True
+                    break
+                j += 1
+        if reject_Q:
+            kept_Q[i] = False
+            continue
+
+        accepted_Q[i] = True
         # left
         j = i - 1
-        while j >= 0 and (xi - p_x[j]) < min_dist: 
-            kept_Q[j] = False
+        while j >= 0 and (xi - p_x[j]) < tmp_min_dist: 
+            if not accepted_Q[j]:
+                kept_Q[j] = False
             j -= 1
         # right
         j = i + 1
-        while j < n and (p_x[j] - xi) < min_dist: 
-            kept_Q[j] = False
+        while j < n and (p_x[j] - xi) < tmp_min_dist: 
+            if not accepted_Q[j]:
+                kept_Q[j] = False
             j += 1 
-    p_x = p_x[kept_Q]
-    p_val = p_val[kept_Q]
-    p_idx = p_idx[kept_Q]
+
+    p_x = p_x[accepted_Q]
+    p_val = p_val[accepted_Q]
+    p_idx = p_idx[accepted_Q]
     return p_x, p_val, p_idx

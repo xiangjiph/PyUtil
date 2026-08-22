@@ -28,7 +28,7 @@ class SlurmComputeConfig:
     qos: Optional[str] = None
     account: Optional[str] = None
     array_spec: Optional[str] = None
-    mail_type: Optional[str] = None
+    mail_type: Optional[str] = "ALL"
     mail_user: Optional[str] = None
     extra_sbatch_lines: Optional[List[str]] = None
     modules: Optional[List[str]] = None
