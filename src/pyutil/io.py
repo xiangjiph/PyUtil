@@ -550,7 +550,7 @@ mpl.rcParams['ps.fonttype'] = 42
 def print_image(fig_hdl, fig_fp, verbose_Q=True, close_fig_Q=False):
     folder_path = os.path.dirname(fig_fp)
     if folder_path and (not os.path.isdir(folder_path)): 
-        os.makedirs(folder_path)
+        os.makedirs(folder_path, exist_ok=True)
 
     if fig_fp.endswith('eps'):
         # Change the font for editable eps file? 

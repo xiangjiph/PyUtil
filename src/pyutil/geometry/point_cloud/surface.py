@@ -894,3 +894,23 @@ class PCSurface3D(PolySurface3D):
         fig.colorbar(ax.collections[0], ax=ax, label="Residual")
         fig.tight_layout()
         return fig, ax
+
+    def compute_point_distance_to_surface_stat(self, num_sample=None, return_pts_Q=False): 
+        if num_sample is None or num_sample >= self.points_xyz.shape[0]:
+            pts_uvw = self.points_uvw
+        else:
+            idx = np.random.choice(self.points_xyz.shape[0], size=num_sample, replace=False)
+            pts_uvw = self.points_uvw[idx]
+        nearest_uvw, nearest_dist = self.project_uvw_points_to_surface(pts_uvw, return_dist_Q=True)
+        dist_stat = stat.compute_basic_statistics(nearest_dist)
+
+        if return_pts_Q:
+            result = {
+                'pts_uvw': pts_uvw, 
+                'pts_uvwp': nearest_uvw,
+                'pts_dist': nearest_dist, 
+            } | dist_stat
+            return result
+        else:
+            return dist_stat
+
