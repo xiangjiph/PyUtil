@@ -20,7 +20,8 @@ from .downsample import (
 from .group import PointCloudGroup
 from .legacy_surface import PointCloud3DSurfaceFit
 from .outlier import select_points_near_pc1, select_points_near_pc1_iterative
-from .surface import PCSurface3D, PolySurface3D
+from .pc_surface import PCSurface3D
+from .surface import PolySurface3D
 
 PointCloud3DPolynomialSurface = PolySurface3D
 PointCloud3DPolynomialSurfaceFit = PCSurface3D

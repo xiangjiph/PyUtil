@@ -34,7 +34,7 @@ class GridDownsamplerND:
 
         if extent is None:
             self.extent = pts.max(axis=0) - self.origin
-            self.extent = self.extent + np.finfo(float).eps
+            self.extent = np.nextafter(self.extent, np.inf)
         else:
             self.extent = np.asarray(extent, dtype=float).reshape(-1)
             if self.extent.size != self.dim:

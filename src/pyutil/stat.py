@@ -58,6 +58,10 @@ def compute_basic_statistics(data, bins=None, opt_stat=['pdf', 'percentile'], \
             result['probability'] = result['hist_count'] / np.sum(result['hist_count'])
             result['pdf'] = result['probability'] / result['bin_width']
             result['cdf'] = np.cumsum(result['probability'])
+        else: 
+            # remove unusaged keys
+            for k in ['num_bins', 'hist_count', 'bin_val', 'bin_edge', 'bin_width', 'probability', 'pdf', 'cdf']:
+                result.pop(k, None)
 
         if 'percentile' in opt_stat: 
             result['prctile_th'] = np.array(

@@ -161,6 +161,16 @@ def test_downsample_points_by_averaging_matches_class_default_api():
     assert np.allclose(centroids_fn, centroids_cls)
 
 
+def test_downsample_points_by_averaging_keeps_points_on_max_grid_boundary():
+    pts = np.array([[200_000.0, 0.0, 0.0], [201_000.0, 2_000.0, 3_000.0]])
+
+    scalar_centroids = downsample_points_by_averaging(pts, 1_000)
+    anisotropic_centroids = downsample_points_by_averaging(pts, [1_000, 2_000, 3_000])
+
+    assert np.array_equal(scalar_centroids, pts)
+    assert np.array_equal(anisotropic_centroids, pts)
+
+
 def test_invalid_inputs_raise_useful_errors():
     with pytest.raises(ValueError, match="strictly positive"):
         GridDownsamplerND(points=np.array([[0.0], [1.0]]), cell_size=0.0)
